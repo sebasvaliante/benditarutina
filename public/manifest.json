@@ -1,0 +1,19 @@
+{
+  "name": "Bendita Rutina",
+  "short_name": "Bendita",
+  "description": "Organizá la rutina de tu familia",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FDFAF3",
+  "theme_color": "#3D2E1F",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

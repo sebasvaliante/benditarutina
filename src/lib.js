@@ -278,5 +278,5 @@ export const generateMemberId = (type, existingConfig) => {
 };
 
 export const getUsedColors = (config) => {
-  return [...config.adults, ...config.kids, ...config.helpers].map(p => p.color);
+  return [...(config.adults || []), ...(config.kids || []), ...(config.helpers || [])].map(p => p.color);
 };

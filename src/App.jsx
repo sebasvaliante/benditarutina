@@ -1429,7 +1429,13 @@ function PinPrompt({ onSuccess, onCancel }) {
 
 function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily }) {
   const [tab, setTab] = useState('share');
-  const [editConfig, setEditConfig] = useState(JSON.parse(JSON.stringify(config)));
+  const [editConfig, setEditConfig] = useState({
+    adults: [],
+    kids: [],
+    helpers: [],
+    bonusPct: 10,
+    ...JSON.parse(JSON.stringify(config))
+  });
   const [pinChange, setPinChange] = useState({ current: '', newPin: '', confirm: '', message: null });
   const [copied, setCopied] = useState(false);
 
@@ -1437,16 +1443,16 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
 
   const updateAdult = (i, field, value) => setEditConfig({ ...editConfig, adults: editConfig.adults.map((a, idx) => idx === i ? { ...a, [field]: value } : a) });
   const updateKid = (i, field, value) => setEditConfig({ ...editConfig, kids: editConfig.kids.map((k, idx) => idx === i ? { ...k, [field]: value } : k) });
-  const updateHelper = (i, field, value) => setEditConfig({ ...editConfig, helpers: editConfig.helpers.map((h, idx) => idx === i ? { ...h, [field]: value } : h) });
-  const removeAdult = (i) => { if (editConfig.adults.length <= 1) { alert('Tiene que haber al menos un adulto.'); return; } setEditConfig({ ...editConfig, adults: editConfig.adults.filter((_, idx) => idx !== i) }); };
-  const removeKid = (i) => { if (editConfig.kids.length <= 1) { alert('Tiene que haber al menos un hijo.'); return; } setEditConfig({ ...editConfig, kids: editConfig.kids.filter((_, idx) => idx !== i) }); };
-  const removeHelper = (i) => setEditConfig({ ...editConfig, helpers: editConfig.helpers.filter((_, idx) => idx !== i) });
-  const addAdult = () => { if (editConfig.adults.length >= 2) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('adult', editConfig); setEditConfig({ ...editConfig, adults: [...editConfig.adults, { id, name: '', color: colors[0]?.color || '#7BA05B' }] }); };
-  const addKid = () => { if (editConfig.kids.length >= 6) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('kid', editConfig); setEditConfig({ ...editConfig, kids: [...editConfig.kids, { id, name: '', color: colors[0]?.color || '#E87A93', young: false }] }); };
-  const addHelper = () => { if (editConfig.helpers.length >= 4) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('helper', editConfig); setEditConfig({ ...editConfig, helpers: [...editConfig.helpers, { id, name: '', color: colors[0]?.color || '#5B96B0' }] }); };
+  const updateHelper = (i, field, value) => setEditConfig({ ...editConfig, helpers: (editConfig.helpers || []).map((h, idx) => idx === i ? { ...h, [field]: value } : h) });
+  const removeAdult = (i) => { if ((editConfig.adults || []).length <= 1) { alert('Tiene que haber al menos un adulto.'); return; } setEditConfig({ ...editConfig, adults: editConfig.adults.filter((_, idx) => idx !== i) }); };
+  const removeKid = (i) => { if ((editConfig.kids || []).length <= 1) { alert('Tiene que haber al menos un hijo.'); return; } setEditConfig({ ...editConfig, kids: editConfig.kids.filter((_, idx) => idx !== i) }); };
+  const removeHelper = (i) => setEditConfig({ ...editConfig, helpers: (editConfig.helpers || []).filter((_, idx) => idx !== i) });
+  const addAdult = () => { if ((editConfig.adults || []).length >= 2) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('adult', editConfig); setEditConfig({ ...editConfig, adults: [...(editConfig.adults || []), { id, name: '', color: colors[0]?.color || '#7BA05B' }] }); };
+  const addKid = () => { if ((editConfig.kids || []).length >= 6) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('kid', editConfig); setEditConfig({ ...editConfig, kids: [...(editConfig.kids || []), { id, name: '', color: colors[0]?.color || '#E87A93', young: false }] }); };
+  const addHelper = () => { if ((editConfig.helpers || []).length >= 4) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('helper', editConfig); setEditConfig({ ...editConfig, helpers: [...(editConfig.helpers || []), { id, name: '', color: colors[0]?.color || '#5B96B0' }] }); };
   const setBonus = (v) => setEditConfig({ ...editConfig, bonusPct: v });
 
-  const canSave = editConfig.adults.every(a => a.name.trim()) && editConfig.kids.every(k => k.name.trim()) && editConfig.helpers.every(h => h.name.trim());
+  const canSave = (editConfig.adults || []).every(a => a.name.trim()) && (editConfig.kids || []).every(k => k.name.trim()) && (editConfig.helpers || []).every(h => h.name.trim());
   const handleSave = () => { if (!canSave) { alert('Completá todos los nombres.'); return; } onUpdate(editConfig); onClose(); };
 
   const handlePinChange = () => {
@@ -1457,7 +1463,6 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
     setStoredFamilyPin(familyCode, pinChange.newPin);
     setPinChange({ current: '', newPin: '', confirm: '', message: { type: 'success', text: 'PIN actualizado' } });
   };
-
   const copyCode = async () => {
     try { await navigator.clipboard.writeText(familyCode); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
   };
@@ -1497,22 +1502,22 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
           </div>
         )}
 
-        {tab === 'family' && (
+       {tab === 'family' && (
           <div>
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Users size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Adultos ({editConfig.adults.length}/2)</div></div>
-              {editConfig.adults.map((a, i) => (<EditorPersonRow key={a.id} person={a} usedColors={usedColors} onUpdate={(f, v) => updateAdult(i, f, v)} onRemove={() => removeAdult(i)} canRemove={editConfig.adults.length > 1} />))}
-              {editConfig.adults.length < 2 && <AddBtn onClick={addAdult} label="Agregar adulto" />}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Users size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Adultos ({(editConfig.adults || []).length}/2)</div></div>
+              {(editConfig.adults || []).map((a, i) => (<EditorPersonRow key={a.id} person={a} usedColors={usedColors} onUpdate={(f, v) => updateAdult(i, f, v)} onRemove={() => removeAdult(i)} canRemove={(editConfig.adults || []).length > 1} />))}
+              {(editConfig.adults || []).length < 2 && <AddBtn onClick={addAdult} label="Agregar adulto" />}
             </div>
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Baby size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Hijos ({editConfig.kids.length}/6)</div></div>
-              {editConfig.kids.map((k, i) => (<EditorPersonRow key={k.id} person={k} usedColors={usedColors} onUpdate={(f, v) => updateKid(i, f, v)} onRemove={() => removeKid(i)} canRemove={editConfig.kids.length > 1} showYoung />))}
-              {editConfig.kids.length < 6 && <AddBtn onClick={addKid} label="Agregar hijo" />}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Baby size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Hijos ({(editConfig.kids || []).length}/6)</div></div>
+              {(editConfig.kids || []).map((k, i) => (<EditorPersonRow key={k.id} person={k} usedColors={usedColors} onUpdate={(f, v) => updateKid(i, f, v)} onRemove={() => removeKid(i)} canRemove={(editConfig.kids || []).length > 1} showYoung />))}
+              {(editConfig.kids || []).length < 6 && <AddBtn onClick={addKid} label="Agregar hijo" />}
             </div>
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><HeartHandshake size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Ayuda ({editConfig.helpers.length}/4)</div></div>
-              {editConfig.helpers.map((h, i) => (<EditorPersonRow key={h.id} person={h} usedColors={usedColors} onUpdate={(f, v) => updateHelper(i, f, v)} onRemove={() => removeHelper(i)} canRemove={true} />))}
-              {editConfig.helpers.length < 4 && <AddBtn onClick={addHelper} label="Agregar ayuda" />}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><HeartHandshake size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Ayuda ({(editConfig.helpers || []).length}/4)</div></div>
+              {(editConfig.helpers || []).map((h, i) => (<EditorPersonRow key={h.id} person={h} usedColors={usedColors} onUpdate={(f, v) => updateHelper(i, f, v)} onRemove={() => removeHelper(i)} canRemove={true} />))}
+              {(editConfig.helpers || []).length < 4 && <AddBtn onClick={addHelper} label="Agregar ayuda" />}
             </div>
             <div style={{ background: '#FFF4E0', padding: '12px 14px', borderRadius: '10px', fontSize: '12px', color: '#6B4F18', marginTop: '12px' }}>⚠️ Si eliminás un miembro, se borran sus rutinas, tareas y trabajos.</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>

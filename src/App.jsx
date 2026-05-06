@@ -473,23 +473,26 @@ function MainApp({ familyConfig, onResetFamily }) {
     const existing = history.find(h => h.kind === 'routine' && h.templateId === itemId && h.date === tk && h.who === kid);
 
     if (existing) {
+      // DESTILDAR
       const wasAllDone = todays.every(r => r.done);
       setHistory(history.filter(h => h.id !== existing.id));
       let toSubtract = itemPoints;
       if (wasAllDone && dayBonus > 0) toSubtract += dayBonus;
-      setPoints(p => ({ ...p, [kid]: Math.max(0, p[kid] - toSubtract) }));
+      setPoints(p => ({ ...p, [kid]: Math.max(0, (p[kid] || 0) - toSubtract) }));
     } else {
+      // TILDAR
       const rect = e.currentTarget.getBoundingClientRect();
       const willAllBeDone = todays.every(r => r.id === itemId || r.done);
       triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[kid].color);
       triggerPointsAnimation(rect.left + rect.width/2, rect.top + rect.height/2, kid, itemPoints);
       setHistory([...history, { id: Date.now(), kind: 'routine', templateId: itemId, date: tk, who: kid, points: itemPoints }]);
+
       let toAdd = itemPoints;
       if (willAllBeDone && dayBonus > 0) {
         toAdd += dayBonus;
         triggerBigCelebration(family[kid].name, family[kid].color, `¡Rutina completa! +${dayBonus} bonus`);
       }
-      setPoints(p => ({ ...p, [kid]: p[kid] + toAdd }));
+      setPoints(p => ({ ...p, [kid]: (p[kid] || 0) + toAdd }));
     }
   };
 

@@ -8,6 +8,7 @@ import {
   getLocation, fetchWeather, weatherCodeToInfo,
   formatMoney, formatTime, formatDate,
   FAMILY_CODE_KEY, getStoredFamilyPin, setStoredFamilyPin,
+  normalizeFamilyData,
 } from './lib.js';
 import { generateFamilyCode, subscribeFamilyData, saveFamilyData, checkFamilyCodeExists } from './firebase.js';
 
@@ -490,7 +491,10 @@ function SummarySection({ title, people, showLock = false, showYoung = false, st
 // ============================================================================
 
 function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
-  const familyConfig = cloudData.config;
+  // Normalizar la data: garantiza que TODAS las propiedades existan con tipos correctos.
+  // Esto elimina la necesidad de defensive checks (|| []) en el resto del código.
+  const safeData = normalizeFamilyData(cloudData);
+  const familyConfig = safeData.config;
   const family = buildFamilyFromOnboarding(familyConfig);
   const adultKeys = familyConfig.adults.map(a => a.id);
   const kidKeys = familyConfig.kids.map(k => k.id);
@@ -498,16 +502,16 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const normalKidKeys = familyConfig.kids.filter(k => !k.young).map(k => k.id);
   const bonusPct = familyConfig.bonusPct ?? DEFAULT_BONUS_PCT;
 
-  // Datos vienen de la nube
-  const tasks = cloudData.tasks || [];
-  const routines = cloudData.routines || {};
-  const bigJobs = cloudData.bigJobs || [];
-  const events = cloudData.events || [];
-  const lists = cloudData.lists || [];
-  const points = cloudData.points || (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
-  const money = cloudData.money || (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
-  const history = cloudData.history || [];
-  const jobInstances = cloudData.jobInstances || [];
+  // Datos garantizados (siempre arrays/objetos, nunca undefined)
+  const tasks = safeData.tasks;
+  const routines = safeData.routines;
+  const bigJobs = safeData.bigJobs;
+  const events = safeData.events;
+  const lists = safeData.lists;
+  const history = safeData.history;
+  const jobInstances = safeData.jobInstances;
+  const points = Object.keys(safeData.points).length > 0 ? safeData.points : (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
+  const money = Object.keys(safeData.money).length > 0 ? safeData.money : (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
 
   // Función para guardar en la nube cualquier cambio
   const saveToCloud = (updates) => {

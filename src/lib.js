@@ -126,7 +126,6 @@ export const setInitialAdminPin = (pin) => {
 export const FAMILY_CODE_KEY = 'familyCode';
 export const FAMILY_PIN_KEY_PREFIX = 'familyPin_';
 
-// PIN guardado por código de familia (para que cada familia tenga su propio PIN sincronizado)
 export const getStoredFamilyPin = (familyCode) => {
   return localStorage.getItem(STORAGE_PREFIX + FAMILY_PIN_KEY_PREFIX + familyCode) || null;
 };
@@ -136,7 +135,6 @@ export const setStoredFamilyPin = (familyCode, pin) => {
   localStorage.setItem(ADMIN_PIN_KEY, pin);
 };
 
-// Empaquetar todos los datos para subir a Firebase
 export const packStateForSync = (state) => ({
   config: state.config,
   tasks: state.tasks || [],
@@ -150,6 +148,59 @@ export const packStateForSync = (state) => ({
   jobInstances: state.jobInstances || [],
   pinHash: state.pinHash || null,
 });
+
+// ============================================================================
+// NORMALIZACIÓN: garantiza que la data SIEMPRE tenga la estructura completa
+// ----------------------------------------------------------------------------
+// Esta función previene errores tipo "Cannot read properties of undefined".
+// Normaliza tanto el primer nivel (lists, tasks, etc.) como las sub-estructuras
+// (cada list tiene .items, cada lista de routines por miembro es array, etc.).
+// ============================================================================
+
+export const normalizeConfig = (config) => {
+  const c = config || {};
+  return {
+    bonusPct: DEFAULT_BONUS_PCT,
+    ...c,
+    adults:  Array.isArray(c.adults)  ? c.adults  : [],
+    kids:    Array.isArray(c.kids)    ? c.kids    : [],
+    helpers: Array.isArray(c.helpers) ? c.helpers : [],
+  };
+};
+
+// Normaliza una lista compartida: garantiza que tenga items como array
+const normalizeList = (list) => ({
+  ...list,
+  items: Array.isArray(list?.items) ? list.items : [],
+});
+
+// Normaliza el objeto routines: cada miembro debe tener un array, no undefined
+const normalizeRoutines = (routines) => {
+  if (!routines || typeof routines !== 'object') return {};
+  const out = {};
+  Object.keys(routines).forEach(memberId => {
+    out[memberId] = Array.isArray(routines[memberId]) ? routines[memberId] : [];
+  });
+  return out;
+};
+
+export const normalizeFamilyData = (raw) => {
+  const data = raw || {};
+  return {
+    config:       normalizeConfig(data.config),
+    tasks:        Array.isArray(data.tasks)        ? data.tasks        : [],
+    bigJobs:      Array.isArray(data.bigJobs)      ? data.bigJobs      : [],
+    events:       Array.isArray(data.events)       ? data.events       : [],
+    lists:        Array.isArray(data.lists)        ? data.lists.map(normalizeList) : [],
+    history:      Array.isArray(data.history)      ? data.history      : [],
+    jobInstances: Array.isArray(data.jobInstances) ? data.jobInstances : [],
+    routines:     normalizeRoutines(data.routines),
+    points:       (data.points && typeof data.points === 'object') ? data.points : {},
+    money:        (data.money  && typeof data.money  === 'object') ? data.money  : {},
+    pinHash:      data.pinHash || null,
+    updatedAt:    data.updatedAt || null,
+  };
+};
 
 // ============================================================================
 // ESTRUCTURA INICIAL VACÍA
@@ -269,14 +320,18 @@ export const formatDate = (d) => {
 // ============================================================================
 
 export const generateMemberId = (type, existingConfig) => {
-  const list = type === 'adult' ? existingConfig.adults
-              : type === 'kid'   ? existingConfig.kids
-              : existingConfig.helpers;
+  const list = type === 'adult' ? (existingConfig.adults || [])
+              : type === 'kid'   ? (existingConfig.kids || [])
+              : (existingConfig.helpers || []);
   let i = 1;
   while (list.some(m => m.id === `${type}${i}`)) i++;
   return `${type}${i}`;
 };
 
 export const getUsedColors = (config) => {
-  return [...(config.adults || []), ...(config.kids || []), ...(config.helpers || [])].map(p => p.color);
+  return [
+    ...(config.adults  || []),
+    ...(config.kids    || []),
+    ...(config.helpers || []),
+  ].map(p => p.color);
 };

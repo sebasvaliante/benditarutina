@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award, Cloud, CloudOff, Copy, Share2, KeyRound, Wifi } from 'lucide-react';
+import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award, Cloud, CloudOff, Copy, Share2, KeyRound, Wifi, PawPrint, Wand2, BookTemplate } from 'lucide-react';
 import {
   DAYS_ES, DAYS_FULL, MONTHS, MONTHS_SHORT, PALETTE, DEFAULT_BONUS_PCT,
+  PET_TYPES, getPetEmoji, getPetTypeLabel, ROUTINE_TEMPLATES,
   dateKey, parseKey, daysBetween, appliesOn, recurrenceLabel, todayKey,
   loadState, saveState, verifyAdminPin, updateAdminPin, setInitialAdminPin,
   buildFamilyFromOnboarding, generateMemberId, getUsedColors,
@@ -12,14 +13,34 @@ import {
 } from './lib.js';
 import { generateFamilyCode, subscribeFamilyData, saveFamilyData, checkFamilyCodeExists } from './firebase.js';
 
+// ============================================================================
+// HELPERS para rutinas (compartidas o individuales)
+// ============================================================================
+// Una rutina puede tener:
+//   - who: string (rutina individual, asignada a 1 miembro) -- LEGACY
+//   - whoIds: array de strings (rutina compartida entre N miembros) -- NUEVO
+// Estas funciones unifican el acceso para que la UI no tenga que distinguir.
+
+const routineAppliesTo = (routine, memberId) => {
+  if (Array.isArray(routine.whoIds)) return routine.whoIds.includes(memberId);
+  return routine.who === memberId;
+};
+
+const routineMembers = (routine) => {
+  if (Array.isArray(routine.whoIds)) return routine.whoIds;
+  if (routine.who) return [routine.who];
+  return [];
+};
+
+const isShared = (routine) => Array.isArray(routine.whoIds) && routine.whoIds.length > 1;
+
 export default function App() {
   const [familyCode, setFamilyCode] = useState(() => loadState(FAMILY_CODE_KEY, null));
   const [cloudData, setCloudData] = useState(null);
-  const [syncStatus, setSyncStatus] = useState('disconnected'); // 'disconnected', 'connecting', 'connected', 'error'
+  const [syncStatus, setSyncStatus] = useState('disconnected');
   const [showWelcome, setShowWelcome] = useState(() => !loadState(FAMILY_CODE_KEY, null));
   const initialLoadDone = useRef(false);
 
-  // Suscribirse a Firebase cuando hay un código
   useEffect(() => {
     if (!familyCode) return;
     setSyncStatus('connecting');
@@ -29,7 +50,6 @@ export default function App() {
         setSyncStatus('connected');
         initialLoadDone.current = true;
       } else {
-        // Familia nueva, sin datos en cloud aún
         setCloudData({ config: null, empty: true });
         setSyncStatus('connected');
         initialLoadDone.current = true;
@@ -68,17 +88,14 @@ export default function App() {
     window.location.reload();
   };
 
-  // Pantalla de bienvenida (primera vez en este dispositivo)
   if (showWelcome) {
     return <WelcomeFlow onNew={handleNewFamily} onJoin={handleJoinFamily} />;
   }
 
-  // Esperando datos de la nube
   if (!cloudData) {
     return <LoadingScreen status={syncStatus} familyCode={familyCode} />;
   }
 
-  // Familia nueva sin configuración: mostrar onboarding
   if (cloudData.empty || !cloudData.config) {
     return <OnboardingFlow
       familyCode={familyCode}
@@ -89,7 +106,6 @@ export default function App() {
     />;
   }
 
-  // App principal
   return <MainApp
     familyCode={familyCode}
     cloudData={cloudData}
@@ -99,11 +115,11 @@ export default function App() {
 }
 
 // ============================================================================
-// WELCOME (primera pantalla)
+// WELCOME
 // ============================================================================
 
 function WelcomeFlow({ onNew, onJoin }) {
-  const [mode, setMode] = useState(null); // null, 'new', 'join'
+  const [mode, setMode] = useState(null);
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -183,7 +199,7 @@ function LoadingScreen({ status, familyCode }) {
 }
 
 // ============================================================================
-// ONBOARDING (cuando se crea una nueva familia)
+// ONBOARDING (con paso de mascotas integrado)
 // ============================================================================
 
 function OnboardingFlow({ familyCode, onComplete, onResetFamily }) {
@@ -191,10 +207,11 @@ function OnboardingFlow({ familyCode, onComplete, onResetFamily }) {
   const [adults, setAdults] = useState([{ id: 'adult1', name: '', color: '#E8804F' }]);
   const [kids, setKids] = useState([{ id: 'kid1', name: '', color: '#F5B645', young: false }]);
   const [helpers, setHelpers] = useState([]);
+  const [pets, setPets] = useState([]);
   const [bonusPct, setBonusPct] = useState(DEFAULT_BONUS_PCT);
   const [pin, setPin] = useState('');
 
-  const usedColors = [...adults, ...kids, ...helpers].map(p => p.color);
+  const usedColors = [...adults, ...kids, ...helpers, ...pets].map(p => p.color);
   const availableColors = (current) => Object.values(PALETTE).filter(p => !usedColors.includes(p.color) || p.color === current);
 
   const addAdult = () => {
@@ -221,30 +238,39 @@ function OnboardingFlow({ familyCode, onComplete, onResetFamily }) {
   const removeHelper = (i) => setHelpers(helpers.filter((_, idx) => idx !== i));
   const updateHelper = (i, field, value) => setHelpers(helpers.map((h, idx) => idx === i ? { ...h, [field]: value } : h));
 
+  const addPet = () => {
+    if (pets.length >= 5) return;
+    const colors = availableColors();
+    setPets([...pets, { id: `pet${pets.length + 1}`, name: '', petType: 'dog', color: colors[0]?.color || '#9B7FB8' }]);
+  };
+  const removePet = (i) => setPets(pets.filter((_, idx) => idx !== i));
+  const updatePet = (i, field, value) => setPets(pets.map((p, idx) => idx === i ? { ...p, [field]: value } : p));
+
   const canAdvance = () => {
     if (step === 1) return adults.every(a => a.name.trim().length > 0);
     if (step === 2) return kids.every(k => k.name.trim().length > 0);
     if (step === 3) return helpers.every(h => h.name.trim().length > 0);
-    if (step === 4) return /^\d{4}$/.test(pin);
+    if (step === 4) return pets.every(p => p.name.trim().length > 0);
+    if (step === 5) return /^\d{4}$/.test(pin);
     return true;
   };
 
   const finish = async () => {
     setInitialAdminPin(pin);
     setStoredFamilyPin(familyCode, pin);
-    await onComplete({ adults, kids, helpers, bonusPct, pinSet: true });
+    await onComplete({ adults, kids, helpers, pets, bonusPct, pinSet: true });
   };
 
   return (
     <OnboardingShell familyCode={familyCode} onResetFamily={onResetFamily}>
-      <StepIndicator step={step} total={7} />
+      <StepIndicator step={step} total={8} />
 
       {step === 0 && (
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '52px', marginBottom: '8px' }}>✦</div>
           <div className="serif" style={{ fontFamily: 'Fraunces, serif', fontSize: '32px', fontWeight: 700, marginBottom: '8px' }}>Tu nueva familia</div>
           <p style={{ fontSize: '13px', color: '#8A7560', lineHeight: 1.5, marginBottom: '14px' }}>
-            Configurá los miembros de tu familia. Después de esto vas a poder compartir el acceso con los demás dispositivos de tu casa.
+            Configurá los miembros de tu familia. Después podés compartir el código con los demás dispositivos de tu casa.
           </p>
           <div style={{ background: '#FBF5E9', padding: '12px 14px', borderRadius: '12px', marginBottom: '20px', fontSize: '12px', color: '#5A4F42' }}>
             Tu código de familia: <strong style={{ fontFamily: 'Fraunces, serif', fontSize: '15px' }}>{familyCode}</strong>
@@ -290,9 +316,12 @@ function OnboardingFlow({ familyCode, onComplete, onResetFamily }) {
 
       {step === 4 && (
         <div>
-          <ObHeader icon={<Award size={22} />} title="Bonus por completar el día" subtitle="Cuando un hijo completa todas sus rutinas del día, suma puntos extra." />
-          <BonusPicker value={bonusPct} onChange={setBonusPct} />
-          <NavButtons onBack={() => setStep(3)} onNext={() => setStep(5)} canNext={true} />
+          <ObHeader icon={<PawPrint size={22} />} title="Mascotas" subtitle="Hasta 5 mascotas. Después podés asignarles tareas como pasearlas o darles de comer. Es opcional." />
+          {pets.map((p, i) => (
+            <PetForm key={p.id} pet={p} index={i} onRemove={() => removePet(i)} onUpdate={(field, value) => updatePet(i, field, value)} usedColors={usedColors} />
+          ))}
+          {pets.length < 5 && <AddBtn onClick={addPet} label="Agregar mascota" />}
+          <NavButtons onBack={() => setStep(3)} onNext={() => setStep(5)} canNext={canAdvance()} />
         </div>
       )}
 
@@ -303,19 +332,27 @@ function OnboardingFlow({ familyCode, onComplete, onResetFamily }) {
             <input type="password" inputMode="numeric" maxLength={4} autoFocus className="ob-pin" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="• • • •" />
             <div style={{ fontSize: '12px', color: '#8A7560', marginTop: '12px' }}>{pin.length}/4 dígitos</div>
           </div>
-          <NavButtons onBack={() => setStep(4)} onNext={() => setStep(6)} canNext={canAdvance()} nextLabel="Revisar" />
+          <NavButtons onBack={() => setStep(4)} onNext={() => setStep(6)} canNext={canAdvance()} />
         </div>
       )}
 
       {step === 6 && (
-        <FamilySummary adults={adults} kids={kids} helpers={helpers} bonusPct={bonusPct} pin={pin} onBack={() => setStep(5)} onFinish={finish} />
+        <div>
+          <ObHeader icon={<Award size={22} />} title="Bonus por completar el día" subtitle="Cuando un hijo completa todas sus rutinas del día, suma puntos extra." />
+          <BonusPicker value={bonusPct} onChange={setBonusPct} />
+          <NavButtons onBack={() => setStep(5)} onNext={() => setStep(7)} canNext={true} nextLabel="Revisar" />
+        </div>
+      )}
+
+      {step === 7 && (
+        <FamilySummary adults={adults} kids={kids} helpers={helpers} pets={pets} bonusPct={bonusPct} pin={pin} onBack={() => setStep(6)} onFinish={finish} />
       )}
     </OnboardingShell>
   );
 }
 
 // ============================================================================
-// COMPONENTES SHARED
+// COMPONENTES SHARED (onboarding)
 // ============================================================================
 
 function OnboardingShell({ children, familyCode, onResetFamily }) {
@@ -354,6 +391,8 @@ function SharedStyles() {
       .step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E8DEC9; transition: all 0.2s; }
       .step-dot.active { background: #3D2E1F; transform: scale(1.4); }
       .step-dot.done { background: #7BA05B; }
+      .pet-type-btn { padding: 8px 12px; border-radius: 10px; border: 2px solid #E8DEC9; background: white; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; font-family: inherit; color: #3D2E1F; }
+      .pet-type-btn.selected { border-color: #3D2E1F; background: #3D2E1F; color: white; }
       @media (max-width: 600px) { .ob-card { padding: 28px 22px; border-radius: 22px; } }
     `}</style>
   );
@@ -415,6 +454,39 @@ function PersonForm({ person, index, canRemove, onRemove, onUpdate, usedColors, 
   );
 }
 
+function PetForm({ pet, index, onRemove, onUpdate, usedColors }) {
+  return (
+    <div className="person-row">
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+        <span style={{ fontSize: '28px' }}>{getPetEmoji(pet.petType)}</span>
+        <input className="ob-input" placeholder="Nombre de la mascota" value={pet.name} onChange={(e) => onUpdate('name', e.target.value)} maxLength={20} />
+        <button onClick={onRemove} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#C0392B', padding: '8px' }}><Trash2 size={18} /></button>
+      </div>
+      <div style={{ marginBottom: '10px' }}>
+        <div style={{ fontSize: '11px', color: '#8A7560', marginBottom: '6px', fontWeight: 600 }}>TIPO</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+          {PET_TYPES.map(t => (
+            <button key={t.id} type="button" onClick={() => onUpdate('petType', t.id)} className={`pet-type-btn ${pet.petType === t.id ? 'selected' : ''}`}>
+              <span style={{ fontSize: '15px' }}>{t.emoji}</span> {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize: '11px', color: '#8A7560', marginBottom: '6px', fontWeight: 600 }}>COLOR</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {Object.values(PALETTE).map(p => {
+            const isUsed = usedColors.includes(p.color) && pet.color !== p.color;
+            return (
+              <button key={p.color} type="button" disabled={isUsed} onClick={() => onUpdate('color', p.color)} className={`ob-color-btn ${pet.color === p.color ? 'selected' : ''}`} style={{ background: p.color }} title={p.name} />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AddBtn({ onClick, label }) {
   return (
     <button onClick={onClick} style={{ width: '100%', padding: '12px', background: 'transparent', border: '1.5px dashed #D4C5B0', borderRadius: '12px', color: '#8A7560', cursor: 'pointer', fontFamily: 'inherit', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '20px' }}>
@@ -441,7 +513,7 @@ function BonusPicker({ value, onChange }) {
   );
 }
 
-function FamilySummary({ adults, kids, helpers, bonusPct, pin, onBack, onFinish }) {
+function FamilySummary({ adults, kids, helpers, pets, bonusPct, pin, onBack, onFinish }) {
   const [saving, setSaving] = useState(false);
   const handleFinish = async () => { setSaving(true); await onFinish(); };
   return (
@@ -452,6 +524,7 @@ function FamilySummary({ adults, kids, helpers, bonusPct, pin, onBack, onFinish 
         <SummarySection title={`Adultos (${adults.length})`} people={adults} showLock />
         <SummarySection title={`Hijos (${kids.length})`} people={kids} showYoung style={{ marginTop: '14px' }} />
         {helpers.length > 0 && <SummarySection title={`Ayuda (${helpers.length})`} people={helpers} style={{ marginTop: '14px' }} />}
+        {pets.length > 0 && <SummarySection title={`Mascotas (${pets.length})`} people={pets} isPet style={{ marginTop: '14px' }} />}
       </div>
       <div style={{ background: '#FFF4E0', padding: '12px 14px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
         <Award size={16} color="#A67C12" />
@@ -471,14 +544,19 @@ function FamilySummary({ adults, kids, helpers, bonusPct, pin, onBack, onFinish 
   );
 }
 
-function SummarySection({ title, people, showLock = false, showYoung = false, style = {} }) {
+function SummarySection({ title, people, showLock = false, showYoung = false, isPet = false, style = {} }) {
   return (
     <div style={style}>
       <div style={{ fontSize: '11px', color: '#8A7560', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>{title}</div>
       {people.map(p => (
         <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0' }}>
-          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: p.color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Fraunces, serif' }}>{p.name.charAt(0).toUpperCase()}</div>
+          {isPet ? (
+            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: p.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px' }}>{getPetEmoji(p.petType)}</div>
+          ) : (
+            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: p.color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Fraunces, serif' }}>{p.name.charAt(0).toUpperCase()}</div>
+          )}
           <span style={{ fontSize: '14px' }}>{p.name}</span>
+          {isPet && <span style={{ fontSize: '11px', color: '#8A7560', fontStyle: 'italic', marginLeft: 'auto' }}>{getPetTypeLabel(p.petType)}</span>}
           {showLock && <Lock size={12} color="#8A7560" style={{ marginLeft: 'auto' }} />}
           {showYoung && p.young && <span style={{ fontSize: '10px', background: '#FFF4E0', color: '#A67C12', padding: '2px 8px', borderRadius: '999px', fontWeight: 600, marginLeft: 'auto' }}>Simple</span>}
         </div>
@@ -487,12 +565,10 @@ function SummarySection({ title, people, showLock = false, showYoung = false, st
   );
 }
 // ============================================================================
-// MAIN APP (con sync en tiempo real)
+// MAIN APP
 // ============================================================================
 
 function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
-  // Normalizar la data: garantiza que TODAS las propiedades existan con tipos correctos.
-  // Esto elimina la necesidad de defensive checks (|| []) en el resto del código.
   const safeData = normalizeFamilyData(cloudData);
   const familyConfig = safeData.config;
   const family = buildFamilyFromOnboarding(familyConfig);
@@ -500,9 +576,9 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const kidKeys = familyConfig.kids.map(k => k.id);
   const youngKidKeys = familyConfig.kids.filter(k => k.young).map(k => k.id);
   const normalKidKeys = familyConfig.kids.filter(k => !k.young).map(k => k.id);
+  const petKeys = familyConfig.pets.map(p => p.id);
   const bonusPct = familyConfig.bonusPct ?? DEFAULT_BONUS_PCT;
 
-  // Datos garantizados (siempre arrays/objetos, nunca undefined)
   const tasks = safeData.tasks;
   const routines = safeData.routines;
   const bigJobs = safeData.bigJobs;
@@ -513,7 +589,6 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const points = Object.keys(safeData.points).length > 0 ? safeData.points : (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
   const money = Object.keys(safeData.money).length > 0 ? safeData.money : (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
 
-  // Función para guardar en la nube cualquier cambio
   const saveToCloud = (updates) => {
     const newData = {
       config: familyConfig,
@@ -537,7 +612,6 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     saveToCloud({ config: newConfig });
   };
 
-  // Cuando llega cloudData, sincronizar PIN local con el de la familia
   useEffect(() => {
     const stored = getStoredFamilyPin(familyCode);
     if (stored) {
@@ -547,7 +621,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
 
   const [activeUser, setActiveUser] = useState(() => {
     const stored = loadState('activeUser', null);
-    if (stored && family[stored]) return stored;
+    if (stored && family[stored] && family[stored].role !== 'pet') return stored;
     return adultKeys[0];
   });
   useEffect(() => saveState('activeUser', activeUser), [activeUser]);
@@ -571,13 +645,25 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const tk = todayKey();
   const today = new Date(); today.setHours(0,0,0,0);
 
+  // Tareas: pueden estar asignadas a humanos o mascotas
   const todaysTasks = tasks.filter(t => family[t.who] && appliesOn(t, today)).map(t => ({
     ...t, done: history.some(h => h.kind === 'task' && h.templateId === t.id && h.date === tk),
   }));
   const todaysEvents = events.filter(e => family[e.who] && appliesOn(e, today));
-  const todaysRoutinesFor = (kid) => (routines[kid] || []).filter(r => appliesOn(r, today)).map(r => ({
-    ...r, done: history.some(h => h.kind === 'routine' && h.templateId === r.id && h.date === tk && h.who === kid),
-  }));
+
+  // Rutinas: el "kid" recibe TODAS las rutinas que le aplican (individuales + compartidas)
+  // Se busca tanto en routines[kid] (formato viejo: rutinas individuales)
+  // como en routines.shared (formato nuevo: rutinas compartidas con whoIds)
+  const todaysRoutinesFor = (kid) => {
+    const direct = (routines[kid] || []);
+    const shared = (routines.shared || []).filter(r => routineAppliesTo(r, kid));
+    const all = [...direct, ...shared].filter(r => appliesOn(r, today));
+    return all.map(r => ({
+      ...r,
+      done: history.some(h => h.kind === 'routine' && h.templateId === r.id && h.date === tk && h.who === kid),
+    }));
+  };
+
   const todaysJobs = bigJobs.filter(j => {
     if (!family[j.who]) return false;
     const hasInstance = jobInstances.some(i => i.jobId === j.id && i.date === tk);
@@ -622,7 +708,8 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const toggleRoutine = (kid, itemId, e) => {
     const todays = todaysRoutinesFor(kid);
     const item = todays.find(r => r.id === itemId);
-    const itemPoints = item?.points || 1;
+    if (!item) return;
+    const itemPoints = item.points || 1;
     const totalDayPoints = todays.reduce((s, r) => s + (r.points || 1), 0);
     const dayBonus = Math.round(totalDayPoints * bonusPct / 100);
     const existing = history.find(h => h.kind === 'routine' && h.templateId === itemId && h.date === tk && h.who === kid);
@@ -702,6 +789,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
 
   const requestPin = (onSuccess) => setPinPrompt({ onSuccess });
   const tryAdminLogin = (userId) => {
+    if (family[userId]?.role === 'pet') return; // mascotas no son perfil activo
     if (family[userId]?.isAdmin) requestPin(() => setActiveUser(userId));
     else setActiveUser(userId);
   };
@@ -724,16 +812,88 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     setModal(null);
   };
   const deleteEvent = (id) => { setEvents(events.filter(e => e.id !== id)); setModal(null); };
+
+  // Guardar rutina: decide si va a routines[member] (individual) o routines.shared (compartida)
   const saveRoutineItem = (member, data) => {
-    const current = routines[member] || [];
-    if (data.id) setRoutines({ ...routines, [member]: current.map(r => r.id === data.id ? { ...r, ...data } : r) });
-    else setRoutines({ ...routines, [member]: [...current, { ...data, id: Date.now() }] });
+    const isCompartida = Array.isArray(data.whoIds) && data.whoIds.length > 1;
+
+    if (isCompartida) {
+      // Va a routines.shared
+      const sharedList = routines.shared || [];
+      let newShared;
+      if (data.id) {
+        // Ediciones: puede venir de individual->compartida o compartida->compartida
+        const existsInShared = sharedList.some(r => r.id === data.id);
+        if (existsInShared) {
+          newShared = sharedList.map(r => r.id === data.id ? { ...r, ...data } : r);
+          setRoutines({ ...routines, shared: newShared });
+        } else {
+          // Era individual, la convertimos en compartida: quitar de [member] y agregar a shared
+          const newMemberRoutines = (routines[member] || []).filter(r => r.id !== data.id);
+          setRoutines({ ...routines, [member]: newMemberRoutines, shared: [...sharedList, { ...data }] });
+        }
+      } else {
+        newShared = [...sharedList, { ...data, id: Date.now() }];
+        setRoutines({ ...routines, shared: newShared });
+      }
+    } else {
+      // Individual: va a routines[member] como antes
+      const targetMember = (data.whoIds && data.whoIds[0]) || member;
+      const sharedList = routines.shared || [];
+      const existsInShared = data.id ? sharedList.some(r => r.id === data.id) : false;
+
+      if (existsInShared) {
+        // Era compartida, ahora individual: quitar de shared y agregar a [target]
+        const newShared = sharedList.filter(r => r.id !== data.id);
+        const targetCurrent = routines[targetMember] || [];
+        setRoutines({ ...routines, shared: newShared, [targetMember]: [...targetCurrent, { ...data }] });
+      } else {
+        const current = routines[targetMember] || [];
+        if (data.id) {
+          setRoutines({ ...routines, [targetMember]: current.map(r => r.id === data.id ? { ...r, ...data } : r) });
+        } else {
+          setRoutines({ ...routines, [targetMember]: [...current, { ...data, id: Date.now() }] });
+        }
+      }
+    }
     setModal(null);
   };
+
   const deleteRoutineItem = (member, id) => {
-    setRoutines({ ...routines, [member]: routines[member].filter(r => r.id !== id) });
+    // Buscar si está en individual o en shared y eliminar
+    const sharedList = routines.shared || [];
+    if (sharedList.some(r => r.id === id)) {
+      setRoutines({ ...routines, shared: sharedList.filter(r => r.id !== id) });
+    } else {
+      setRoutines({ ...routines, [member]: (routines[member] || []).filter(r => r.id !== id) });
+    }
     setModal(null);
   };
+
+  // Aplicar template: crea N rutinas asignadas al/los miembro/s elegido/s
+  const applyTemplate = (template, targetMemberIds) => {
+    if (!Array.isArray(targetMemberIds) || targetMemberIds.length === 0) return;
+    const isCompartida = targetMemberIds.length > 1;
+    const newItems = template.steps.map((step, idx) => ({
+      id: Date.now() + idx,
+      ...(step.label !== undefined ? { label: step.label } : { text: step.text }),
+      icon: step.icon,
+      points: step.points || 1,
+      recurrence: { type: 'daily', startDate: todayKey() },
+      ...(isCompartida ? { whoIds: targetMemberIds } : {}),
+    }));
+
+    if (isCompartida) {
+      const sharedList = routines.shared || [];
+      setRoutines({ ...routines, shared: [...sharedList, ...newItems] });
+    } else {
+      const targetMember = targetMemberIds[0];
+      const current = routines[targetMember] || [];
+      setRoutines({ ...routines, [targetMember]: [...current, ...newItems] });
+    }
+    setModal(null);
+  };
+
   const saveList = (data) => {
     if (data.id) setLists(lists.map(l => l.id === data.id ? { ...l, name: data.name, icon: data.icon } : l));
     else setLists([...lists, { ...data, id: Date.now(), items: [] }]);
@@ -752,10 +912,21 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const clearCompletedItems = (listId) => setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => !i.done) } : l));
 
   const updateFamilyConfig = (newConfig) => {
-    const allNewIds = [...newConfig.adults, ...newConfig.kids, ...newConfig.helpers].map(p => p.id);
+    const allNewIds = [...newConfig.adults, ...newConfig.kids, ...newConfig.helpers, ...(newConfig.pets || [])].map(p => p.id);
     const newKidKeys = newConfig.kids.map(k => k.id);
     const cleanedRoutines = {};
-    Object.keys(routines).forEach(k => { if (allNewIds.includes(k)) cleanedRoutines[k] = routines[k]; });
+    Object.keys(routines).forEach(k => {
+      if (k === 'shared') {
+        // Para rutinas compartidas: solo conservar miembros válidos en whoIds
+        const cleaned = (routines.shared || []).map(r => ({
+          ...r,
+          whoIds: (r.whoIds || []).filter(id => allNewIds.includes(id)),
+        })).filter(r => r.whoIds.length > 0); // si no queda nadie, eliminarla
+        cleanedRoutines.shared = cleaned;
+      } else if (allNewIds.includes(k)) {
+        cleanedRoutines[k] = routines[k];
+      }
+    });
     const cleanedPoints = {};
     newKidKeys.forEach(k => { cleanedPoints[k] = points[k] || 0; });
     const cleanedMoney = {};
@@ -770,10 +941,16 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       points: cleanedPoints,
       money: cleanedMoney,
     });
-    if (!allNewIds.includes(activeUser)) setActiveUser(newConfig.adults[0]?.id || allNewIds[0]);
+    if (!allNewIds.includes(activeUser) || family[activeUser]?.role === 'pet') {
+      setActiveUser(newConfig.adults[0]?.id || allNewIds[0]);
+    }
   };
 
   const w = weather ? weatherCodeToInfo(weather.code) : null;
+
+  // Para el switcher, separamos personas de mascotas
+  const peopleEntries = Object.entries(family).filter(([k, m]) => m.role !== 'pet');
+  const petEntries = Object.entries(family).filter(([k, m]) => m.role === 'pet');
 
   return (
     <div style={{ fontFamily: '"DM Sans", -apple-system, sans-serif', background: '#FDFAF3', minHeight: '100vh', color: '#3D2E1F', position: 'relative', overflowX: 'hidden' }}>
@@ -802,11 +979,16 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
           </div>
           <div className="header-right" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
             <div className="user-switcher">
-              {Object.entries(family).map(([k, m]) => (
+              {peopleEntries.map(([k, m]) => (
                 <button key={k} onClick={() => tryAdminLogin(k)} className={activeUser === k ? 'active' : ''} style={{ background: m.color }} title={m.name}>
                   {m.initial}
                   {m.isAdmin && <Lock size={10} style={{ position: 'absolute', bottom: '-2px', right: '-2px', background: 'white', borderRadius: '50%', padding: '2px', color: '#3D2E1F' }} />}
                 </button>
+              ))}
+              {petEntries.map(([k, m]) => (
+                <div key={k} title={`${m.name} (${getPetTypeLabel(m.petType)})`} style={{ background: m.color, width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', cursor: 'default' }}>
+                  {m.emoji}
+                </div>
               ))}
               {isAdmin && <button onClick={() => setShowSettings(true)} title="Ajustes" style={{ background: '#8A7560', width: '34px', height: '34px' }}><SettingsIcon size={16} /></button>}
             </div>
@@ -830,7 +1012,10 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
           <span style={{ fontSize: '12px', color: '#8A7560', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '4px' }}>Ver:</span>
           <button onClick={() => setViewFilter('all')} className="pill" style={{ background: viewFilter === 'all' ? '#3D2E1F' : 'white', color: viewFilter === 'all' ? '#FDFAF3' : '#3D2E1F', border: viewFilter === 'all' ? 'none' : '1px solid #D4C5B0', cursor: 'pointer', fontFamily: 'inherit', padding: '6px 14px', fontWeight: 600 }}>Todo</button>
           {Object.entries(family).map(([k, m]) => (
-            <button key={k} onClick={() => setViewFilter(k)} className="pill" style={{ background: viewFilter === k ? m.color : 'white', color: viewFilter === k ? 'white' : '#3D2E1F', border: viewFilter === k ? 'none' : '1px solid #D4C5B0', cursor: 'pointer', fontFamily: 'inherit', padding: '6px 14px', fontWeight: 600 }}>{m.name}</button>
+            <button key={k} onClick={() => setViewFilter(k)} className="pill" style={{ background: viewFilter === k ? m.color : 'white', color: viewFilter === k ? 'white' : '#3D2E1F', border: viewFilter === k ? 'none' : '1px solid #D4C5B0', cursor: 'pointer', fontFamily: 'inherit', padding: '6px 14px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              {m.role === 'pet' && <span>{m.emoji}</span>}
+              {m.name}
+            </button>
           ))}
         </div>
 
@@ -867,7 +1052,8 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       {modal && modal.type === 'task' && <TaskModal data={modal.data} family={family} onSave={saveTask} onDelete={deleteTask} onClose={() => setModal(null)} />}
       {modal && modal.type === 'job' && <JobModal data={modal.data} family={family} kidKeys={kidKeys} onSave={saveJob} onDelete={deleteJob} onClose={() => setModal(null)} />}
       {modal && modal.type === 'event' && <EventModal data={modal.data} family={family} onSave={saveEvent} onDelete={deleteEvent} onClose={() => setModal(null)} />}
-      {modal && modal.type === 'routine' && <RoutineModal data={modal.data} member={modal.member} memberData={family[modal.member]} onSave={(d) => saveRoutineItem(modal.member, d)} onDelete={(id) => deleteRoutineItem(modal.member, id)} onClose={() => setModal(null)} />}
+      {modal && modal.type === 'routine' && <RoutineModal data={modal.data} member={modal.member} memberData={family[modal.member]} family={family} kidKeys={kidKeys} onSave={(d) => saveRoutineItem(modal.member, d)} onDelete={(id) => deleteRoutineItem(modal.member, id)} onClose={() => setModal(null)} />}
+      {modal && modal.type === 'routineTemplates' && <RoutineTemplatesModal member={modal.member} memberData={family[modal.member]} family={family} kidKeys={kidKeys} onApply={applyTemplate} onClose={() => setModal(null)} onCreateBlank={() => setModal({ type: 'routine', member: modal.member, data: null })} />}
       {modal && modal.type === 'list' && <ListModal data={modal.data} onSave={saveList} onDelete={deleteList} onClose={() => setModal(null)} />}
       {modal && modal.type === 'listItem' && <ListItemModal data={modal.data} listId={modal.listId} onSave={(d) => saveListItem(modal.listId, d)} onClose={() => setModal(null)} />}
       {pinPrompt && <PinPrompt onSuccess={() => { pinPrompt.onSuccess(); setPinPrompt(null); }} onCancel={() => setPinPrompt(null)} />}
@@ -915,6 +1101,7 @@ function MainStyles() {
       .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 14px; flex-shrink: 0; }
       .pill { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
       .btn-primary { background: #3D2E1F; color: #FDFAF3; border: none; border-radius: 12px; padding: 10px 16px; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+      .btn-secondary { background: #7BA05B; color: white; border: none; border-radius: 12px; padding: 10px 16px; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
       .btn-success { background: #7BA05B; color: white; border: none; border-radius: 10px; padding: 8px 14px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
       .btn-ghost { background: transparent; color: #8A7560; border: 1px solid #D4C5B0; border-radius: 10px; padding: 8px 14px; font-family: inherit; font-size: 13px; cursor: pointer; }
       .btn-danger { background: transparent; color: #C0392B; border: 1px solid #E8B5AD; border-radius: 10px; padding: 8px 14px; font-family: inherit; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
@@ -924,6 +1111,7 @@ function MainStyles() {
       .field { margin-bottom: 18px; }
       .recurrence-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #8A7560; background: #F5EFE6; padding: 3px 8px; border-radius: 999px; font-weight: 500; }
       .points-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #A67C12; background: #FFF4E0; padding: 3px 8px; border-radius: 999px; font-weight: 600; }
+      .shared-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: #5C7D42; background: #EDF4E2; padding: 2px 7px; border-radius: 999px; font-weight: 600; }
       @keyframes confettiFly { 0% { transform: translate(0,0) rotate(0deg); opacity: 1; } 100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); opacity: 0; } }
       @keyframes pointsRise { 0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; } 15% { transform: translate(-50%, -10px) scale(1.3); opacity: 1; } 100% { transform: translate(-50%, -90px) scale(1); opacity: 0; } }
       @keyframes bigPop { 0% { transform: translate(-50%,-50%) scale(0.3); opacity: 0; } 15% { transform: translate(-50%,-50%) scale(1.15); opacity: 1; } 25% { transform: translate(-50%,-50%) scale(1); opacity: 1; } 85% { transform: translate(-50%,-50%) scale(1); opacity: 1; } 100% { transform: translate(-50%,-50%) scale(0.9); opacity: 0; } }
@@ -953,6 +1141,9 @@ function MainStyles() {
       .editor-row { background: #FBF5E9; padding: 12px; border-radius: 10px; margin-bottom: 8px; }
       .tab-pill { padding: 8px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600; border: 1.5px solid #E8DEC9; background: white; color: #3D2E1F; }
       .tab-pill.selected { background: #3D2E1F; color: white; border-color: #3D2E1F; }
+      .template-card { background: white; border: 2px solid #E8DEC9; border-radius: 16px; padding: 16px; cursor: pointer; transition: all 0.15s; text-align: left; font-family: inherit; color: #3D2E1F; width: 100%; }
+      .template-card:hover { border-color: #3D2E1F; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(61,46,31,0.1); }
+      .template-card.selected { border-color: #3D2E1F; background: #FBF5E9; }
       .app-container { max-width: 1600px; margin: 0 auto; }
       .header-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 24px; padding: 20px 32px 16px; }
       .header-row > .header-left { justify-self: start; }
@@ -972,7 +1163,6 @@ function MainStyles() {
     `}</style>
   );
 }
-
 // ============================================================================
 // VIEWS
 // ============================================================================
@@ -1023,7 +1213,9 @@ function TodayView({ family, kidKeys, events, tasks, points, toggleTask }) {
             <div key={t.id} onClick={(e) => toggleTask(t.id, e)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', cursor: 'pointer' }}>
               <div className={`checkbox ${t.done ? 'done' : ''}`}>{t.done && <Check size={16} color="#FDFAF3" strokeWidth={3} />}</div>
               <div style={{ flex: 1, fontSize: '14px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</div>
-              <div className="avatar" style={{ background: family[t.who]?.color || '#999', width: '28px', height: '28px', fontSize: '12px' }}>{family[t.who]?.initial}</div>
+              <div className="avatar" style={{ background: family[t.who]?.color || '#999', width: '28px', height: '28px', fontSize: '12px' }}>
+                {family[t.who]?.role === 'pet' ? family[t.who].emoji : family[t.who]?.initial}
+              </div>
             </div>
           ))}
         </div>
@@ -1086,7 +1278,9 @@ function TasksView({ family, todaysTasks, toggleTask, isAdmin, setModal }) {
               <div className="recurrence-badge"><Repeat size={10} />{recurrenceLabel(t.recurrence)}</div>
             </div>
           </div>
-          <div className="avatar" style={{ background: family[t.who]?.color || '#999' }}>{family[t.who]?.initial}</div>
+          <div className="avatar" style={{ background: family[t.who]?.color || '#999' }}>
+            {family[t.who]?.role === 'pet' ? family[t.who].emoji : family[t.who]?.initial}
+          </div>
           {isAdmin && <button onClick={() => setModal({ type: 'task', data: t })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#8A7560' }}><Edit2 size={16} /></button>}
         </div>
       ))}
@@ -1155,14 +1349,26 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
                     <div style={{ fontSize: '22px' }}>{item.icon}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '13px', fontWeight: 500, textDecoration: item.done ? 'line-through' : 'none', opacity: item.done ? 0.5 : 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.text}</div>
-                      <div className="points-badge" style={{ marginTop: '3px' }}>{item.points || 1} pt{(item.points || 1) > 1 ? 's' : ''}</div>
+                      <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                        <div className="points-badge">{item.points || 1} pt{(item.points || 1) > 1 ? 's' : ''}</div>
+                        {isShared(item) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
+                      </div>
                     </div>
                     <div className={`checkbox ${item.done ? 'done' : ''}`} style={{ width: '22px', height: '22px' }}>{item.done && <Check size={13} color="#FDFAF3" strokeWidth={3} />}</div>
                   </div>
                   {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', color: '#8A7560' }}><Edit2 size={14} /></button>}
                 </div>
               ))}
-              {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ width: '100%', marginTop: '8px', padding: '10px', background: 'transparent', border: '1.5px dashed #D4C5B0', borderRadius: '12px', color: '#8A7560', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Plus size={14} /> Agregar paso</button>}
+              {isAdmin && (
+                <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                  <button onClick={() => setModal({ type: 'routineTemplates', member: kid })} style={{ flex: 1, padding: '10px', background: '#FBF5E9', border: '1.5px solid #E8DEC9', borderRadius: '12px', color: '#3D2E1F', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                    <Wand2 size={14} /> Usar plantilla
+                  </button>
+                  <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ flex: 1, padding: '10px', background: 'transparent', border: '1.5px dashed #D4C5B0', borderRadius: '12px', color: '#8A7560', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                    <Plus size={14} /> Agregar paso
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1195,6 +1401,12 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
                     {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ position: 'absolute', top: '6px', right: '6px', background: 'rgba(255,255,255,0.9)', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8A7560' }}><Edit2 size={11} /></button>}
                   </div>
                 ))}
+                {isAdmin && (
+                  <button onClick={() => setModal({ type: 'routineTemplates', member: kid })} style={{ aspectRatio: '1', background: '#FBF5E9', border: '2px solid #E8DEC9', borderRadius: '18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#3D2E1F', fontFamily: 'inherit' }}>
+                    <Wand2 size={26} />
+                    <div style={{ fontSize: '11px', fontWeight: 600, marginTop: '4px' }}>Plantilla</div>
+                  </button>
+                )}
                 {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ aspectRatio: '1', background: 'transparent', border: '2px dashed #D4C5B0', borderRadius: '18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8A7560', fontFamily: 'inherit' }}><Plus size={26} /><div style={{ fontSize: '11px', fontWeight: 500, marginTop: '4px' }}>Agregar</div></button>}
               </div>
             </div>
@@ -1347,14 +1559,20 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
     const kidHist = monthHist.filter(h => h.who === k);
     return { k, ...family[k], routinesDone: kidHist.filter(h => h.kind === 'routine').length, jobsDone: kidHist.filter(h => h.kind === 'job').length, moneyEarned: kidHist.reduce((s, h) => s + (h.money || 0), 0), pointsEarned: kidHist.reduce((s, h) => s + (h.points || 0), 0) };
   });
+  const findRoutineTitle = (h) => {
+    // Buscar en routines[h.who] (individual)
+    const direct = (routines[h.who] || []).find(rt => rt.id === h.templateId);
+    if (direct) return direct.text || direct.label || '?';
+    // Buscar en routines.shared (compartida)
+    const shared = (routines.shared || []).find(rt => rt.id === h.templateId);
+    if (shared) return shared.text || shared.label || '?';
+    return '?';
+  };
   const getTitle = (h) => {
     if (h.title) return h.title;
     if (h.kind === 'task') return tasks.find(t => t.id === h.templateId)?.text || '?';
     if (h.kind === 'job') return bigJobs.find(j => j.id === h.templateId)?.title || '?';
-    if (h.kind === 'routine') {
-      const r = routines[h.who]?.find(rt => rt.id === h.templateId);
-      return r?.text || r?.label || '?';
-    }
+    if (h.kind === 'routine') return findRoutineTitle(h);
     return '?';
   };
   const kindLabel = { task: 'Tarea', routine: 'Rutina', job: 'Trabajo' };
@@ -1385,7 +1603,9 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
         {filtered.length === 0 && <div style={{ color: '#8A7560' }}>Aún no hay actividad registrada.</div>}
         {filtered.slice(0, 30).map(h => (
           <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', borderBottom: '1px solid #F5EFE6' }}>
-            <div className="avatar" style={{ background: family[h.who]?.color || '#999', width: '30px', height: '30px', fontSize: '12px' }}>{family[h.who]?.initial}</div>
+            <div className="avatar" style={{ background: family[h.who]?.color || '#999', width: '30px', height: '30px', fontSize: '12px' }}>
+              {family[h.who]?.role === 'pet' ? family[h.who].emoji : family[h.who]?.initial}
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTitle(h)}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
@@ -1434,10 +1654,7 @@ function PinPrompt({ onSuccess, onCancel }) {
 function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily }) {
   const [tab, setTab] = useState('share');
   const [editConfig, setEditConfig] = useState({
-    adults: [],
-    kids: [],
-    helpers: [],
-    bonusPct: 10,
+    adults: [], kids: [], helpers: [], pets: [], bonusPct: 10,
     ...JSON.parse(JSON.stringify(config))
   });
   const [pinChange, setPinChange] = useState({ current: '', newPin: '', confirm: '', message: null });
@@ -1448,15 +1665,21 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
   const updateAdult = (i, field, value) => setEditConfig({ ...editConfig, adults: editConfig.adults.map((a, idx) => idx === i ? { ...a, [field]: value } : a) });
   const updateKid = (i, field, value) => setEditConfig({ ...editConfig, kids: editConfig.kids.map((k, idx) => idx === i ? { ...k, [field]: value } : k) });
   const updateHelper = (i, field, value) => setEditConfig({ ...editConfig, helpers: (editConfig.helpers || []).map((h, idx) => idx === i ? { ...h, [field]: value } : h) });
+  const updatePet = (i, field, value) => setEditConfig({ ...editConfig, pets: (editConfig.pets || []).map((p, idx) => idx === i ? { ...p, [field]: value } : p) });
+
   const removeAdult = (i) => { if ((editConfig.adults || []).length <= 1) { alert('Tiene que haber al menos un adulto.'); return; } setEditConfig({ ...editConfig, adults: editConfig.adults.filter((_, idx) => idx !== i) }); };
   const removeKid = (i) => { if ((editConfig.kids || []).length <= 1) { alert('Tiene que haber al menos un hijo.'); return; } setEditConfig({ ...editConfig, kids: editConfig.kids.filter((_, idx) => idx !== i) }); };
   const removeHelper = (i) => setEditConfig({ ...editConfig, helpers: (editConfig.helpers || []).filter((_, idx) => idx !== i) });
+  const removePet = (i) => setEditConfig({ ...editConfig, pets: (editConfig.pets || []).filter((_, idx) => idx !== i) });
+
   const addAdult = () => { if ((editConfig.adults || []).length >= 2) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('adult', editConfig); setEditConfig({ ...editConfig, adults: [...(editConfig.adults || []), { id, name: '', color: colors[0]?.color || '#7BA05B' }] }); };
   const addKid = () => { if ((editConfig.kids || []).length >= 6) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('kid', editConfig); setEditConfig({ ...editConfig, kids: [...(editConfig.kids || []), { id, name: '', color: colors[0]?.color || '#E87A93', young: false }] }); };
   const addHelper = () => { if ((editConfig.helpers || []).length >= 4) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('helper', editConfig); setEditConfig({ ...editConfig, helpers: [...(editConfig.helpers || []), { id, name: '', color: colors[0]?.color || '#5B96B0' }] }); };
+  const addPet = () => { if ((editConfig.pets || []).length >= 5) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('pet', editConfig); setEditConfig({ ...editConfig, pets: [...(editConfig.pets || []), { id, name: '', petType: 'dog', color: colors[0]?.color || '#9B7FB8' }] }); };
+
   const setBonus = (v) => setEditConfig({ ...editConfig, bonusPct: v });
 
-  const canSave = (editConfig.adults || []).every(a => a.name.trim()) && (editConfig.kids || []).every(k => k.name.trim()) && (editConfig.helpers || []).every(h => h.name.trim());
+  const canSave = (editConfig.adults || []).every(a => a.name.trim()) && (editConfig.kids || []).every(k => k.name.trim()) && (editConfig.helpers || []).every(h => h.name.trim()) && (editConfig.pets || []).every(p => p.name.trim());
   const handleSave = () => { if (!canSave) { alert('Completá todos los nombres.'); return; } onUpdate(editConfig); onClose(); };
 
   const handlePinChange = () => {
@@ -1482,6 +1705,7 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
         <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', flexWrap: 'wrap' }}>
           <div className={`tab-pill ${tab === 'share' ? 'selected' : ''}`} onClick={() => setTab('share')}>Compartir</div>
           <div className={`tab-pill ${tab === 'family' ? 'selected' : ''}`} onClick={() => setTab('family')}>Miembros</div>
+          <div className={`tab-pill ${tab === 'pets' ? 'selected' : ''}`} onClick={() => setTab('pets')}>Mascotas</div>
           <div className={`tab-pill ${tab === 'bonus' ? 'selected' : ''}`} onClick={() => setTab('bonus')}>Bonus</div>
           <div className={`tab-pill ${tab === 'pin' ? 'selected' : ''}`} onClick={() => setTab('pin')}>PIN</div>
           <div className={`tab-pill ${tab === 'danger' ? 'selected' : ''}`} onClick={() => setTab('danger')} style={{ marginLeft: 'auto' }}>Avanzado</div>
@@ -1506,7 +1730,7 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
           </div>
         )}
 
-       {tab === 'family' && (
+        {tab === 'family' && (
           <div>
             <div className="editor-section">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Users size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Adultos ({(editConfig.adults || []).length}/2)</div></div>
@@ -1524,6 +1748,21 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
               {(editConfig.helpers || []).length < 4 && <AddBtn onClick={addHelper} label="Agregar ayuda" />}
             </div>
             <div style={{ background: '#FFF4E0', padding: '12px 14px', borderRadius: '10px', fontSize: '12px', color: '#6B4F18', marginTop: '12px' }}>⚠️ Si eliminás un miembro, se borran sus rutinas, tareas y trabajos.</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+              <button className="btn-primary" onClick={handleSave} disabled={!canSave}>Guardar</button>
+            </div>
+          </div>
+        )}
+
+        {tab === 'pets' && (
+          <div>
+            <div className="editor-section">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><PawPrint size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Mascotas ({(editConfig.pets || []).length}/5)</div></div>
+              <p style={{ fontSize: '12px', color: '#8A7560', marginBottom: '14px', lineHeight: 1.5 }}>Las mascotas pueden tener tareas asignadas (pasearlas, darles de comer) pero no son perfiles activos.</p>
+              {(editConfig.pets || []).map((p, i) => (<EditorPetRow key={p.id} pet={p} usedColors={usedColors} onUpdate={(f, v) => updatePet(i, f, v)} onRemove={() => removePet(i)} />))}
+              {(editConfig.pets || []).length < 5 && <AddBtn onClick={addPet} label="Agregar mascota" />}
+            </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
               <button className="btn-ghost" onClick={onClose}>Cancelar</button>
               <button className="btn-primary" onClick={handleSave} disabled={!canSave}>Guardar</button>
@@ -1589,6 +1828,37 @@ function EditorPersonRow({ person, usedColors, onUpdate, onRemove, canRemove, sh
   );
 }
 
+function EditorPetRow({ pet, usedColors, onUpdate, onRemove }) {
+  return (
+    <div className="editor-row">
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+        <span style={{ fontSize: '24px' }}>{getPetEmoji(pet.petType)}</span>
+        <input className="input" placeholder="Nombre" value={pet.name} onChange={(e) => onUpdate('name', e.target.value)} maxLength={20} style={{ background: 'white' }} />
+        <button onClick={onRemove} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#C0392B', padding: '6px' }}><Trash2 size={16} /></button>
+      </div>
+      <div style={{ marginBottom: '10px' }}>
+        <div style={{ fontSize: '11px', color: '#8A7560', marginBottom: '6px', fontWeight: 600 }}>TIPO</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+          {PET_TYPES.map(t => (
+            <button key={t.id} type="button" onClick={() => onUpdate('petType', t.id)} className={`pet-type-btn ${pet.petType === t.id ? 'selected' : ''}`}>
+              <span style={{ fontSize: '14px' }}>{t.emoji}</span> {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize: '11px', color: '#8A7560', marginBottom: '6px', fontWeight: 600 }}>COLOR</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+          {Object.values(PALETTE).map(p => {
+            const isUsed = usedColors.includes(p.color) && pet.color !== p.color;
+            return (<button key={p.color} type="button" disabled={isUsed} onClick={() => onUpdate('color', p.color)} className={`ob-color-btn ${pet.color === p.color ? 'selected' : ''}`} style={{ background: p.color, width: '28px', height: '28px' }} title={p.name} />);
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalShell({ title, onClose, onSave, onDelete, hasId, children }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -1615,7 +1885,44 @@ function PersonPicker({ family, value, onChange, label = 'Asignar a' }) {
     <div className="field">
       <div className="label">{label}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-        {Object.entries(family).map(([k, m]) => (<div key={k} className={`person-chip ${value === k ? 'selected' : ''}`} style={{ '--clr': m.color }} onClick={() => onChange(k)}><div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '11px' }}>{m.initial}</div>{m.name}</div>))}
+        {Object.entries(family).map(([k, m]) => (
+          <div key={k} className={`person-chip ${value === k ? 'selected' : ''}`} style={{ '--clr': m.color }} onClick={() => onChange(k)}>
+            {m.role === 'pet' ? (
+              <div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '13px' }}>{m.emoji}</div>
+            ) : (
+              <div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '11px' }}>{m.initial}</div>
+            )}
+            {m.name}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MultiPersonPicker({ family, kidKeys, values, onChange, label = 'Asignar a' }) {
+  // Solo permite asignar rutinas a hijos
+  const toggle = (k) => {
+    if (values.includes(k)) onChange(values.filter(v => v !== k));
+    else onChange([...values, k]);
+  };
+  return (
+    <div className="field">
+      <div className="label">{label}</div>
+      <p style={{ fontSize: '11px', color: '#8A7560', marginBottom: '8px', fontStyle: 'italic' }}>Si elegís a más de uno, queda como rutina compartida: cada uno la marca en lo suyo y suma puntos individualmente.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {kidKeys.map(k => {
+          const m = family[k];
+          if (!m) return null;
+          const selected = values.includes(k);
+          return (
+            <div key={k} className={`person-chip ${selected ? 'selected' : ''}`} style={{ '--clr': m.color }} onClick={() => toggle(k)}>
+              <div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '11px' }}>{m.initial}</div>
+              {m.name}
+              {selected && <Check size={13} color={m.color} />}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1730,20 +2037,115 @@ function EventModal({ data, family, onSave, onDelete, onClose }) {
   );
 }
 
-function RoutineModal({ data, member, memberData, onSave, onDelete, onClose }) {
+function RoutineModal({ data, member, memberData, family, kidKeys, onSave, onDelete, onClose }) {
   const isYoung = memberData?.young;
+  const initialWhoIds = Array.isArray(data?.whoIds) ? data.whoIds : (data?.who ? [data.who] : (member ? [member] : []));
   const [text, setText] = useState(data?.text || data?.label || '');
   const [icon, setIcon] = useState(data?.icon || (isYoung ? '👕' : '🛏️'));
   const [points, setPoints] = useState(data?.points || 1);
+  const [whoIds, setWhoIds] = useState(initialWhoIds);
   const [recurrence, setRecurrence] = useState(data?.recurrence || { type: 'daily', startDate: todayKey() });
-  const handleSave = () => { if (!text.trim()) return; if (isYoung) onSave({ id: data?.id, label: text, icon, points, recurrence }); else onSave({ id: data?.id, text, icon, points, recurrence }); };
+
+  const handleSave = () => {
+    if (!text.trim()) return;
+    if (whoIds.length === 0) { alert('Asigná la rutina a al menos un hijo.'); return; }
+    const base = isYoung ? { label: text } : { text };
+    const payload = {
+      id: data?.id,
+      ...base,
+      icon,
+      points,
+      recurrence,
+      whoIds, // siempre guardamos whoIds; el handler decide si va a individual o shared
+    };
+    onSave(payload);
+  };
+
   return (
-    <ModalShell title={`${data ? 'Editar' : 'Nuevo'} paso · ${memberData?.name}`} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
+    <ModalShell title={`${data ? 'Editar' : 'Nuevo'} paso · rutinas`} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
       <div className="field"><div className="label">{isYoung ? 'Etiqueta' : 'Paso'}</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} autoFocus /></div>
-      <IconPicker icons={['👕','🥣','🪥','💆','🧴','🧥','🛏️','🥐','🎒','🎸','👟','📚','🚿','🧦','🍎','🎨','📝']} value={icon} onChange={setIcon} />
+      <IconPicker icons={['👕','🥣','🪥','💆','🧴','🧥','🛏️','🥐','🎒','🎸','👟','📚','🚿','🧦','🍎','🎨','📝','🚽','🧼','🪑','🍽️','🍴','📖','⏰','✏️','📓','🧺','📵','💧','⚽','😴','📅','🌻','🍳','🗑️','💬']} value={icon} onChange={setIcon} />
       <PointsPicker value={points} onChange={setPoints} />
+      <MultiPersonPicker family={family} kidKeys={kidKeys} values={whoIds} onChange={setWhoIds} label="Asignar a (hijos)" />
       <RecurrencePicker recurrence={recurrence} onChange={setRecurrence} />
     </ModalShell>
+  );
+}
+
+function RoutineTemplatesModal({ member, memberData, family, kidKeys, onApply, onClose, onCreateBlank }) {
+  const isYoung = memberData?.young;
+  const groupKey = isYoung ? 'young' : (member && family[member]?.young ? 'young' : 'kid'); // default
+  const [tab, setTab] = useState(groupKey);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [targetIds, setTargetIds] = useState([member]);
+
+  const groups = [
+    { id: 'young',   label: 'Vista simple', subtitle: '≤5 años' },
+    { id: 'kid',     label: 'Niños',        subtitle: '6-10 años' },
+    { id: 'preteen', label: 'Pre-adolescentes', subtitle: '11+ años' },
+  ];
+
+  const apply = () => {
+    if (!selectedTemplate) return;
+    if (targetIds.length === 0) { alert('Elegí a quién aplicar la plantilla.'); return; }
+    onApply(selectedTemplate, targetIds);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <div className="serif" style={{ fontSize: '22px', fontWeight: 600 }}>Plantillas de rutina</div>
+          <button onClick={onClose} style={{ background: '#FBF5E9', border: 'none', borderRadius: '50%', width: '34px', height: '34px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={17} /></button>
+        </div>
+        <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '18px' }}>Elegí una plantilla por edad. Después podés editar o borrar pasos.</p>
+
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          {groups.map(g => (
+            <div key={g.id} className={`tab-pill ${tab === g.id ? 'selected' : ''}`} onClick={() => { setTab(g.id); setSelectedTemplate(null); }}>
+              {g.label} <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '4px' }}>{g.subtitle}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '20px' }}>
+          {(ROUTINE_TEMPLATES[tab] || []).map(tpl => (
+            <button key={tpl.id} className={`template-card ${selectedTemplate?.id === tpl.id ? 'selected' : ''}`} onClick={() => setSelectedTemplate(tpl)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                <div style={{ fontSize: '24px' }}>{tpl.icon}</div>
+                <div className="serif" style={{ fontSize: '15px', fontWeight: 700 }}>{tpl.name}</div>
+              </div>
+              <div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>{tpl.description}</div>
+              <div style={{ fontSize: '11px', color: '#A67C12', fontWeight: 600 }}>{tpl.steps.length} pasos</div>
+            </button>
+          ))}
+        </div>
+
+        {selectedTemplate && (
+          <div className="editor-section" style={{ background: '#FBF5E9', marginBottom: '14px' }}>
+            <div style={{ fontSize: '12px', color: '#8A7560', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>Vista previa de pasos</div>
+            {selectedTemplate.steps.map((step, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0' }}>
+                <div style={{ fontSize: '20px' }}>{step.icon}</div>
+                <div style={{ flex: 1, fontSize: '13px' }}>{step.text || step.label}</div>
+                <div className="points-badge">{step.points || 1} pt</div>
+              </div>
+            ))}
+            <div style={{ marginTop: '14px' }}>
+              <MultiPersonPicker family={family} kidKeys={kidKeys} values={targetIds} onChange={setTargetIds} label="Aplicar a" />
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+          <button className="btn-ghost" onClick={onCreateBlank}>Crear desde cero</button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+            <button className="btn-primary" onClick={apply} disabled={!selectedTemplate}>Aplicar plantilla</button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

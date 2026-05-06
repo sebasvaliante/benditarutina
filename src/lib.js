@@ -23,6 +23,212 @@ export const PALETTE = {
 export const DEFAULT_BONUS_PCT = 30;
 
 // ============================================================================
+// MASCOTAS
+// ============================================================================
+
+export const PET_TYPES = [
+  { id: 'dog',    label: 'Perro',   emoji: '🐶' },
+  { id: 'cat',    label: 'Gato',    emoji: '🐱' },
+  { id: 'bird',   label: 'Pájaro',  emoji: '🦜' },
+  { id: 'rabbit', label: 'Conejo',  emoji: '🐰' },
+  { id: 'fish',   label: 'Pez',     emoji: '🐠' },
+  { id: 'turtle', label: 'Tortuga', emoji: '🐢' },
+  { id: 'hamster',label: 'Hámster', emoji: '🐹' },
+  { id: 'other',  label: 'Otro',    emoji: '🐾' },
+];
+
+export const getPetEmoji = (typeId) => PET_TYPES.find(t => t.id === typeId)?.emoji || '🐾';
+export const getPetTypeLabel = (typeId) => PET_TYPES.find(t => t.id === typeId)?.label || 'Mascota';
+
+// ============================================================================
+// TEMPLATES DE RUTINAS PREDEFINIDAS
+// ============================================================================
+
+export const ROUTINE_TEMPLATES = {
+  young: [
+    {
+      id: 'young_morning',
+      name: 'Mañana de los chiquitos',
+      description: 'Para empezar el día con todo listo',
+      icon: '🌅',
+      points: 1,
+      steps: [
+        { label: 'Levantarme', icon: '🛏️', points: 1 },
+        { label: 'Hacer pis', icon: '🚽', points: 1 },
+        { label: 'Vestirme', icon: '👕', points: 1 },
+        { label: 'Desayunar', icon: '🥣', points: 1 },
+        { label: 'Lavarme los dientes', icon: '🪥', points: 1 },
+      ],
+    },
+    {
+      id: 'young_night',
+      name: 'Antes de dormir',
+      description: 'Rutina de la noche, pasos simples',
+      icon: '🌙',
+      points: 1,
+      steps: [
+        { label: 'Bañarme', icon: '🚿', points: 1 },
+        { label: 'Pijama', icon: '👕', points: 1 },
+        { label: 'Lavarme los dientes', icon: '🪥', points: 1 },
+        { label: 'Cuento o canción', icon: '📚', points: 1 },
+      ],
+    },
+    {
+      id: 'young_meals',
+      name: 'En la mesa',
+      description: 'Cosas que hacemos al comer',
+      icon: '🍽️',
+      points: 1,
+      steps: [
+        { label: 'Lavarme las manos', icon: '🧼', points: 1 },
+        { label: 'Sentarme bien', icon: '🪑', points: 1 },
+        { label: 'Comer todo', icon: '🍽️', points: 2 },
+        { label: 'Llevar el plato', icon: '🍴', points: 1 },
+      ],
+    },
+  ],
+  kid: [
+    {
+      id: 'kid_morning',
+      name: 'Mañana de cole',
+      description: 'Todo lo que hace falta antes de salir',
+      icon: '🎒',
+      points: 1,
+      steps: [
+        { text: 'Levantarme con la primera alarma', icon: '⏰', points: 2 },
+        { text: 'Hacer la cama', icon: '🛏️', points: 1 },
+        { text: 'Vestirme con el uniforme', icon: '👕', points: 1 },
+        { text: 'Desayunar tranquilo', icon: '🥣', points: 1 },
+        { text: 'Lavarme los dientes', icon: '🪥', points: 1 },
+        { text: 'Revisar la mochila', icon: '🎒', points: 2 },
+      ],
+    },
+    {
+      id: 'kid_homework',
+      name: 'Tarea y estudio',
+      description: 'Después del cole',
+      icon: '📚',
+      points: 2,
+      steps: [
+        { text: 'Sacar la merienda y comer', icon: '🍎', points: 1 },
+        { text: 'Revisar agenda escolar', icon: '📓', points: 1 },
+        { text: 'Hacer la tarea', icon: '✏️', points: 3 },
+        { text: 'Guardar útiles en la mochila', icon: '🎒', points: 1 },
+      ],
+    },
+    {
+      id: 'kid_night',
+      name: 'Rutina de noche',
+      description: 'Para llegar bien a la cama',
+      icon: '🌙',
+      points: 1,
+      steps: [
+        { text: 'Bañarme', icon: '🚿', points: 2 },
+        { text: 'Ponerme el pijama', icon: '👕', points: 1 },
+        { text: 'Lavarme los dientes', icon: '🪥', points: 1 },
+        { text: 'Preparar lo del día siguiente', icon: '🎒', points: 1 },
+        { text: 'Lectura 15 minutos', icon: '📖', points: 2 },
+      ],
+    },
+    {
+      id: 'kid_chores',
+      name: 'Ayuda en casa',
+      description: 'Tareas chicas para colaborar',
+      icon: '🏠',
+      points: 2,
+      steps: [
+        { text: 'Ordenar mi cuarto', icon: '🧸', points: 2 },
+        { text: 'Poner la mesa', icon: '🍽️', points: 1 },
+        { text: 'Levantar la mesa después de comer', icon: '🍴', points: 1 },
+        { text: 'Sacar la ropa sucia al canasto', icon: '🧺', points: 1 },
+      ],
+    },
+    {
+      id: 'kid_health',
+      name: 'Hábitos saludables',
+      description: 'Pequeñas cosas que suman a largo plazo',
+      icon: '💪',
+      points: 1,
+      steps: [
+        { text: 'Tomar al menos 4 vasos de agua', icon: '💧', points: 2 },
+        { text: 'Comer una fruta', icon: '🍎', points: 1 },
+        { text: 'Moverme o jugar afuera 30 min', icon: '⚽', points: 2 },
+        { text: 'Estar sin pantallas en la mesa', icon: '📵', points: 2 },
+      ],
+    },
+  ],
+  preteen: [
+    {
+      id: 'preteen_morning',
+      name: 'Mañana autogestionada',
+      description: 'Empezar el día sin que nadie te avise',
+      icon: '🌅',
+      points: 2,
+      steps: [
+        { text: 'Despertarme con mi propia alarma', icon: '⏰', points: 3 },
+        { text: 'Hacer la cama', icon: '🛏️', points: 1 },
+        { text: 'Higiene completa (cara, dientes, peinarme)', icon: '🪥', points: 2 },
+        { text: 'Vestirme apropiado para el día', icon: '👕', points: 1 },
+        { text: 'Desayunar y lavar lo que usé', icon: '🥣', points: 2 },
+        { text: 'Tener todo listo 10 min antes de salir', icon: '🎒', points: 3 },
+      ],
+    },
+    {
+      id: 'preteen_study',
+      name: 'Estudio y responsabilidades',
+      description: 'Para la tarde, después del colegio',
+      icon: '📚',
+      points: 3,
+      steps: [
+        { text: 'Revisar tareas y exámenes próximos', icon: '📅', points: 2 },
+        { text: 'Hacer la tarea con concentración', icon: '✏️', points: 4 },
+        { text: 'Repasar 20 minutos lo que vi en clase', icon: '📖', points: 3 },
+        { text: 'Organizar la mochila para mañana', icon: '🎒', points: 1 },
+      ],
+    },
+    {
+      id: 'preteen_night',
+      name: 'Cierre del día',
+      description: 'Para descansar bien',
+      icon: '🌙',
+      points: 2,
+      steps: [
+        { text: 'Dejar el celular a cargar fuera del cuarto', icon: '📱', points: 3 },
+        { text: 'Ducha o higiene de noche', icon: '🚿', points: 2 },
+        { text: 'Lectura o algo tranquilo 20 min', icon: '📖', points: 2 },
+        { text: 'Dormir antes de las 22:30', icon: '😴', points: 3 },
+      ],
+    },
+    {
+      id: 'preteen_independence',
+      name: 'Autonomía en casa',
+      description: 'Tareas para colaborar como adolescente',
+      icon: '🏠',
+      points: 3,
+      steps: [
+        { text: 'Mantener mi cuarto ordenado', icon: '🛏️', points: 2 },
+        { text: 'Lavar mi ropa (o ayudar)', icon: '🧺', points: 3 },
+        { text: 'Cocinar o ayudar con una comida', icon: '🍳', points: 4 },
+        { text: 'Sacar la basura cuando toca', icon: '🗑️', points: 2 },
+      ],
+    },
+    {
+      id: 'preteen_wellbeing',
+      name: 'Bienestar y autocuidado',
+      description: 'Hábitos que te van a servir toda la vida',
+      icon: '🌱',
+      points: 2,
+      steps: [
+        { text: '30 min de actividad física', icon: '⚽', points: 3 },
+        { text: 'Tiempo sin pantallas (1 hora)', icon: '📵', points: 3 },
+        { text: 'Hablar con alguien de la familia', icon: '💬', points: 2 },
+        { text: 'Escribir 3 cosas buenas del día', icon: '📝', points: 2 },
+      ],
+    },
+  ],
+};
+
+// ============================================================================
 // FECHAS Y RECURRENCIA
 // ============================================================================
 
@@ -150,11 +356,7 @@ export const packStateForSync = (state) => ({
 });
 
 // ============================================================================
-// NORMALIZACIÓN: garantiza que la data SIEMPRE tenga la estructura completa
-// ----------------------------------------------------------------------------
-// Esta función previene errores tipo "Cannot read properties of undefined".
-// Normaliza tanto el primer nivel (lists, tasks, etc.) como las sub-estructuras
-// (cada list tiene .items, cada lista de routines por miembro es array, etc.).
+// NORMALIZACIÓN
 // ============================================================================
 
 export const normalizeConfig = (config) => {
@@ -165,16 +367,15 @@ export const normalizeConfig = (config) => {
     adults:  Array.isArray(c.adults)  ? c.adults  : [],
     kids:    Array.isArray(c.kids)    ? c.kids    : [],
     helpers: Array.isArray(c.helpers) ? c.helpers : [],
+    pets:    Array.isArray(c.pets)    ? c.pets    : [],
   };
 };
 
-// Normaliza una lista compartida: garantiza que tenga items como array
 const normalizeList = (list) => ({
   ...list,
   items: Array.isArray(list?.items) ? list.items : [],
 });
 
-// Normaliza el objeto routines: cada miembro debe tener un array, no undefined
 const normalizeRoutines = (routines) => {
   if (!routines || typeof routines !== 'object') return {};
   const out = {};
@@ -242,6 +443,17 @@ export const buildFamilyFromOnboarding = (data) => {
       color: helper.color,
       isAdmin: false,
       role: 'helper',
+    };
+  });
+  (data.pets || []).forEach((pet) => {
+    family[pet.id] = {
+      name: pet.name,
+      initial: pet.name.charAt(0).toUpperCase(),
+      color: pet.color,
+      isAdmin: false,
+      role: 'pet',
+      petType: pet.petType,
+      emoji: getPetEmoji(pet.petType),
     };
   });
   return family;
@@ -322,6 +534,7 @@ export const formatDate = (d) => {
 export const generateMemberId = (type, existingConfig) => {
   const list = type === 'adult' ? (existingConfig.adults || [])
               : type === 'kid'   ? (existingConfig.kids || [])
+              : type === 'pet'   ? (existingConfig.pets || [])
               : (existingConfig.helpers || []);
   let i = 1;
   while (list.some(m => m.id === `${type}${i}`)) i++;
@@ -333,5 +546,6 @@ export const getUsedColors = (config) => {
     ...(config.adults  || []),
     ...(config.kids    || []),
     ...(config.helpers || []),
+    ...(config.pets    || []),
   ].map(p => p.color);
 };

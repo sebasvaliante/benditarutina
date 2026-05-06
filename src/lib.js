@@ -120,6 +120,38 @@ export const setInitialAdminPin = (pin) => {
 };
 
 // ============================================================================
+// SYNC: helpers para gestionar el código de familia
+// ============================================================================
+
+export const FAMILY_CODE_KEY = 'familyCode';
+export const FAMILY_PIN_KEY_PREFIX = 'familyPin_';
+
+// PIN guardado por código de familia (para que cada familia tenga su propio PIN sincronizado)
+export const getStoredFamilyPin = (familyCode) => {
+  return localStorage.getItem(STORAGE_PREFIX + FAMILY_PIN_KEY_PREFIX + familyCode) || null;
+};
+
+export const setStoredFamilyPin = (familyCode, pin) => {
+  localStorage.setItem(STORAGE_PREFIX + FAMILY_PIN_KEY_PREFIX + familyCode, pin);
+  localStorage.setItem(ADMIN_PIN_KEY, pin);
+};
+
+// Empaquetar todos los datos para subir a Firebase
+export const packStateForSync = (state) => ({
+  config: state.config,
+  tasks: state.tasks || [],
+  routines: state.routines || {},
+  bigJobs: state.bigJobs || [],
+  events: state.events || [],
+  lists: state.lists || [],
+  points: state.points || {},
+  money: state.money || {},
+  history: state.history || [],
+  jobInstances: state.jobInstances || [],
+  pinHash: state.pinHash || null,
+});
+
+// ============================================================================
 // ESTRUCTURA INICIAL VACÍA
 // ============================================================================
 
@@ -133,7 +165,7 @@ export const FAMILY = {};
 
 export const buildFamilyFromOnboarding = (data) => {
   const family = {};
-  data.adults.forEach((adult) => {
+  (data.adults || []).forEach((adult) => {
     family[adult.id] = {
       name: adult.name,
       initial: adult.name.charAt(0).toUpperCase(),
@@ -142,7 +174,7 @@ export const buildFamilyFromOnboarding = (data) => {
       role: 'adult',
     };
   });
-  data.kids.forEach((kid) => {
+  (data.kids || []).forEach((kid) => {
     family[kid.id] = {
       name: kid.name,
       initial: kid.name.charAt(0).toUpperCase(),
@@ -152,7 +184,7 @@ export const buildFamilyFromOnboarding = (data) => {
       young: !!kid.young,
     };
   });
-  data.helpers.forEach((helper) => {
+  (data.helpers || []).forEach((helper) => {
     family[helper.id] = {
       name: helper.name,
       initial: helper.name.charAt(0).toUpperCase(),

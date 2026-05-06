@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award, Cloud, CloudOff, Copy, Share2, KeyRound, Wifi } from 'lucide-react';
 import {
   DAYS_ES, DAYS_FULL, MONTHS, MONTHS_SHORT, PALETTE, DEFAULT_BONUS_PCT,
   dateKey, parseKey, daysBetween, appliesOn, recurrenceLabel, todayKey,
@@ -7,40 +7,185 @@ import {
   buildFamilyFromOnboarding, generateMemberId, getUsedColors,
   getLocation, fetchWeather, weatherCodeToInfo,
   formatMoney, formatTime, formatDate,
+  FAMILY_CODE_KEY, getStoredFamilyPin, setStoredFamilyPin,
 } from './lib.js';
+import { generateFamilyCode, subscribeFamilyData, saveFamilyData, checkFamilyCodeExists } from './firebase.js';
 
 export default function App() {
-  const [familyConfig, setFamilyConfig] = useState(() => loadState('familyConfig', null));
-  const [showOnboarding, setShowOnboarding] = useState(() => !loadState('familyConfig', null));
+  const [familyCode, setFamilyCode] = useState(() => loadState(FAMILY_CODE_KEY, null));
+  const [cloudData, setCloudData] = useState(null);
+  const [syncStatus, setSyncStatus] = useState('disconnected'); // 'disconnected', 'connecting', 'connected', 'error'
+  const [showWelcome, setShowWelcome] = useState(() => !loadState(FAMILY_CODE_KEY, null));
+  const initialLoadDone = useRef(false);
 
-  if (showOnboarding || !familyConfig) {
-    return <OnboardingFlow onComplete={(config) => {
-      saveState('familyConfig', config);
-      setFamilyConfig(config);
-      setShowOnboarding(false);
-    }} />;
+  // Suscribirse a Firebase cuando hay un código
+  useEffect(() => {
+    if (!familyCode) return;
+    setSyncStatus('connecting');
+    const unsubscribe = subscribeFamilyData(familyCode, (data) => {
+      if (data) {
+        setCloudData(data);
+        setSyncStatus('connected');
+        initialLoadDone.current = true;
+      } else {
+        // Familia nueva, sin datos en cloud aún
+        setCloudData({ config: null, empty: true });
+        setSyncStatus('connected');
+        initialLoadDone.current = true;
+      }
+    });
+    return () => { try { unsubscribe(); } catch {} };
+  }, [familyCode]);
+
+  const handleNewFamily = () => {
+    const newCode = generateFamilyCode();
+    saveState(FAMILY_CODE_KEY, newCode);
+    setFamilyCode(newCode);
+    setShowWelcome(false);
+  };
+
+  const handleJoinFamily = async (code) => {
+    const cleanCode = code.trim().toLowerCase();
+    if (!cleanCode || cleanCode.length < 4) {
+      alert('Ingresá un código válido');
+      return false;
+    }
+    const exists = await checkFamilyCodeExists(cleanCode);
+    if (!exists) {
+      alert(`No encontramos una familia con el código "${cleanCode}". Verificá que esté bien escrito.`);
+      return false;
+    }
+    saveState(FAMILY_CODE_KEY, cleanCode);
+    setFamilyCode(cleanCode);
+    setShowWelcome(false);
+    return true;
+  };
+
+  const handleResetFamily = () => {
+    if (!confirm('¿Estás seguro? Esto te desconecta de la familia actual en este dispositivo. Los datos en la nube se conservan.')) return;
+    Object.keys(localStorage).filter(k => k.startsWith('benditarutina_')).forEach(k => localStorage.removeItem(k));
+    window.location.reload();
+  };
+
+  // Pantalla de bienvenida (primera vez en este dispositivo)
+  if (showWelcome) {
+    return <WelcomeFlow onNew={handleNewFamily} onJoin={handleJoinFamily} />;
   }
 
+  // Esperando datos de la nube
+  if (!cloudData) {
+    return <LoadingScreen status={syncStatus} familyCode={familyCode} />;
+  }
+
+  // Familia nueva sin configuración: mostrar onboarding
+  if (cloudData.empty || !cloudData.config) {
+    return <OnboardingFlow
+      familyCode={familyCode}
+      onComplete={async (config) => {
+        await saveFamilyData(familyCode, { config, updatedAt: Date.now() });
+      }}
+      onResetFamily={handleResetFamily}
+    />;
+  }
+
+  // App principal
   return <MainApp
-    familyConfig={familyConfig}
-    setFamilyConfig={(updated) => {
-      saveState('familyConfig', updated);
-      setFamilyConfig(updated);
-    }}
-    onResetFamily={() => {
-      if (confirm('¿Estás seguro? Esto borra TODA la configuración y datos de la familia.')) {
-        Object.keys(localStorage).filter(k => k.startsWith('benditarutina_')).forEach(k => localStorage.removeItem(k));
-        window.location.reload();
-      }
-    }}
+    familyCode={familyCode}
+    cloudData={cloudData}
+    syncStatus={syncStatus}
+    onResetFamily={handleResetFamily}
   />;
 }
 
 // ============================================================================
-// ONBOARDING
+// WELCOME (primera pantalla)
 // ============================================================================
 
-function OnboardingFlow({ onComplete }) {
+function WelcomeFlow({ onNew, onJoin }) {
+  const [mode, setMode] = useState(null); // null, 'new', 'join'
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmitJoin = async () => {
+    setLoading(true);
+    const ok = await onJoin(code);
+    setLoading(false);
+    if (!ok) setCode('');
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #FFF8EE 0%, #FDFAF3 50%, #FFE8D6 100%)', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"DM Sans", -apple-system, sans-serif', color: '#3D2E1F' }}>
+      <SharedStyles />
+      <div className="ob-card" style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: '52px', marginBottom: '8px' }}>✦</div>
+        <div className="serif" style={{ fontFamily: 'Fraunces, serif', fontSize: '32px', fontWeight: 700, marginBottom: '8px' }}>Bendita Rutina</div>
+        <p style={{ fontSize: '14px', color: '#8A7560', marginBottom: '28px' }}>
+          La rutina compartida de tu familia, en todos tus dispositivos.
+        </p>
+
+        {mode === null && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <button className="ob-btn" onClick={onNew} style={{ width: '100%', justifyContent: 'center', padding: '16px' }}>
+              <Sparkles size={18} /> Soy nueva familia
+            </button>
+            <button className="ob-btn ob-btn-ghost" onClick={() => setMode('join')} style={{ width: '100%', justifyContent: 'center', padding: '16px' }}>
+              <KeyRound size={18} /> Tengo un código de familia
+            </button>
+            <p style={{ fontSize: '12px', color: '#8A7560', marginTop: '14px', lineHeight: 1.5 }}>
+              <strong>¿Qué es un código de familia?</strong><br/>
+              Es como una "sala compartida" donde todos los dispositivos de tu familia ven los mismos datos. Cada familia tiene su propio código.
+            </p>
+          </div>
+        )}
+
+        {mode === 'join' && (
+          <div>
+            <p style={{ fontSize: '14px', color: '#5A4F42', marginBottom: '14px' }}>
+              Pegá el código de familia que te compartieron:
+            </p>
+            <input
+              className="ob-input"
+              placeholder="ej: feliz-luna-3421"
+              value={code}
+              onChange={(e) => setCode(e.target.value.toLowerCase())}
+              style={{ textAlign: 'center', fontFamily: 'Fraunces, serif', fontSize: '17px', letterSpacing: '0.02em', marginBottom: '16px' }}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmitJoin()}
+              disabled={loading}
+            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="ob-btn ob-btn-ghost" onClick={() => { setMode(null); setCode(''); }} style={{ flex: 1, justifyContent: 'center' }} disabled={loading}>Atrás</button>
+              <button className="ob-btn" onClick={handleSubmitJoin} style={{ flex: 1, justifyContent: 'center' }} disabled={!code.trim() || loading}>
+                {loading ? 'Conectando...' : 'Conectar'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LoadingScreen({ status, familyCode }) {
+  return (
+    <div style={{ minHeight: '100vh', background: '#FDFAF3', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '14px', fontFamily: 'DM Sans, sans-serif', color: '#3D2E1F' }}>
+      <div style={{ fontSize: '48px' }}>✦</div>
+      <div className="serif" style={{ fontFamily: 'Fraunces, serif', fontSize: '22px', fontWeight: 600 }}>Bendita Rutina</div>
+      <div style={{ fontSize: '13px', color: '#8A7560' }}>
+        {status === 'connecting' ? 'Conectando con la nube...' : 'Cargando...'}
+      </div>
+      <div style={{ fontSize: '11px', color: '#B8A78C', marginTop: '4px' }}>
+        Familia: <strong>{familyCode}</strong>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ONBOARDING (cuando se crea una nueva familia)
+// ============================================================================
+
+function OnboardingFlow({ familyCode, onComplete, onResetFamily }) {
   const [step, setStep] = useState(0);
   const [adults, setAdults] = useState([{ id: 'adult1', name: '', color: '#E8804F' }]);
   const [kids, setKids] = useState([{ id: 'kid1', name: '', color: '#F5B645', young: false }]);
@@ -83,23 +228,27 @@ function OnboardingFlow({ onComplete }) {
     return true;
   };
 
-  const finish = () => {
+  const finish = async () => {
     setInitialAdminPin(pin);
-    onComplete({ adults, kids, helpers, bonusPct });
+    setStoredFamilyPin(familyCode, pin);
+    await onComplete({ adults, kids, helpers, bonusPct, pinSet: true });
   };
 
   return (
-    <OnboardingShell>
+    <OnboardingShell familyCode={familyCode} onResetFamily={onResetFamily}>
       <StepIndicator step={step} total={7} />
 
       {step === 0 && (
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '52px', marginBottom: '8px' }}>✦</div>
-          <div className="serif" style={{ fontFamily: 'Fraunces, serif', fontSize: '34px', fontWeight: 700, marginBottom: '12px' }}>Bendita Rutina</div>
-          <p style={{ fontSize: '15px', color: '#8A7560', lineHeight: 1.6, marginBottom: '28px', maxWidth: '420px', margin: '0 auto 28px' }}>
-            Vamos a configurar tu familia en unos pocos pasos. Esto va a quedar guardado en este dispositivo.
+          <div className="serif" style={{ fontFamily: 'Fraunces, serif', fontSize: '32px', fontWeight: 700, marginBottom: '8px' }}>Tu nueva familia</div>
+          <p style={{ fontSize: '13px', color: '#8A7560', lineHeight: 1.5, marginBottom: '14px' }}>
+            Configurá los miembros de tu familia. Después de esto vas a poder compartir el acceso con los demás dispositivos de tu casa.
           </p>
-          <button className="ob-btn" onClick={() => setStep(1)} style={{ fontSize: '16px' }}>
+          <div style={{ background: '#FBF5E9', padding: '12px 14px', borderRadius: '12px', marginBottom: '20px', fontSize: '12px', color: '#5A4F42' }}>
+            Tu código de familia: <strong style={{ fontFamily: 'Fraunces, serif', fontSize: '15px' }}>{familyCode}</strong>
+          </div>
+          <button className="ob-btn" onClick={() => setStep(1)} style={{ fontSize: '15px' }}>
             Empezar <ChevronRight size={18} />
           </button>
         </div>
@@ -109,10 +258,7 @@ function OnboardingFlow({ onComplete }) {
         <div>
           <ObHeader icon={<Users size={22} />} title="Los adultos" subtitle="1 o 2 adultos. Son quienes tienen acceso de administrador." />
           {adults.map((a, i) => (
-            <PersonForm key={a.id} person={a} index={i} canRemove={adults.length > 1}
-              onRemove={() => removeAdult(i)}
-              onUpdate={(field, value) => updateAdult(i, field, value)}
-              usedColors={usedColors} placeholder={`Nombre del adulto ${i + 1}`} />
+            <PersonForm key={a.id} person={a} index={i} canRemove={adults.length > 1} onRemove={() => removeAdult(i)} onUpdate={(field, value) => updateAdult(i, field, value)} usedColors={usedColors} placeholder={`Nombre del adulto ${i + 1}`} />
           ))}
           {adults.length < 2 && <AddBtn onClick={addAdult} label="Agregar segundo adulto" />}
           <NavButtons onBack={() => setStep(0)} onNext={() => setStep(2)} canNext={canAdvance()} />
@@ -121,14 +267,9 @@ function OnboardingFlow({ onComplete }) {
 
       {step === 2 && (
         <div>
-          <ObHeader icon={<Baby size={22} />} title="Los hijos"
-            subtitle='De 1 a 6 hijos. Marcá "Más chico" si tiene 5 años o menos: la app le muestra una vista más simple con íconos grandes.' />
+          <ObHeader icon={<Baby size={22} />} title="Los hijos" subtitle='De 1 a 6 hijos. Marcá "Vista simple" si tiene 5 años o menos.' />
           {kids.map((k, i) => (
-            <PersonForm key={k.id} person={k} index={i} canRemove={kids.length > 1}
-              onRemove={() => removeKid(i)}
-              onUpdate={(field, value) => updateKid(i, field, value)}
-              usedColors={usedColors} placeholder={`Nombre del hijo ${i + 1}`}
-              showYoung={true} />
+            <PersonForm key={k.id} person={k} index={i} canRemove={kids.length > 1} onRemove={() => removeKid(i)} onUpdate={(field, value) => updateKid(i, field, value)} usedColors={usedColors} placeholder={`Nombre del hijo ${i + 1}`} showYoung={true} />
           ))}
           {kids.length < 6 && <AddBtn onClick={addKid} label="Agregar otro hijo" />}
           <NavButtons onBack={() => setStep(1)} onNext={() => setStep(3)} canNext={canAdvance()} />
@@ -137,24 +278,18 @@ function OnboardingFlow({ onComplete }) {
 
       {step === 3 && (
         <div>
-          <ObHeader icon={<HeartHandshake size={22} />} title="Ayuda en casa"
-            subtitle="Personas que ayudan en la casa (empleada doméstica, niñera, abuela). Pueden ver y completar sus tareas. Es opcional." />
+          <ObHeader icon={<HeartHandshake size={22} />} title="Ayuda en casa" subtitle="Personas que ayudan en la casa. Es opcional." />
           {helpers.map((h, i) => (
-            <PersonForm key={h.id} person={h} index={i} canRemove={true}
-              onRemove={() => removeHelper(i)}
-              onUpdate={(field, value) => updateHelper(i, field, value)}
-              usedColors={usedColors} placeholder="Nombre" />
+            <PersonForm key={h.id} person={h} index={i} canRemove={true} onRemove={() => removeHelper(i)} onUpdate={(field, value) => updateHelper(i, field, value)} usedColors={usedColors} placeholder="Nombre" />
           ))}
           {helpers.length < 4 && <AddBtn onClick={addHelper} label="Agregar persona de ayuda" />}
-          {helpers.length === 0 && <p style={{ fontSize: '12px', color: '#8A7560', fontStyle: 'italic', marginBottom: '20px' }}>Si no tenés ayuda en casa, podés saltar este paso sin agregar nada.</p>}
           <NavButtons onBack={() => setStep(2)} onNext={() => setStep(4)} canNext={canAdvance()} />
         </div>
       )}
 
       {step === 4 && (
         <div>
-          <ObHeader icon={<Award size={22} />} title="Bonus por completar el día"
-            subtitle="Cuando un hijo completa todas sus rutinas del día, suma puntos extra. ¿Cuánto bonus querés dar?" />
+          <ObHeader icon={<Award size={22} />} title="Bonus por completar el día" subtitle="Cuando un hijo completa todas sus rutinas del día, suma puntos extra." />
           <BonusPicker value={bonusPct} onChange={setBonusPct} />
           <NavButtons onBack={() => setStep(3)} onNext={() => setStep(5)} canNext={true} />
         </div>
@@ -162,8 +297,7 @@ function OnboardingFlow({ onComplete }) {
 
       {step === 5 && (
         <div>
-          <ObHeader icon={<Lock size={22} />} title="PIN de admin"
-            subtitle="4 dígitos. Sirve para que los hijos no puedan auto-aprobar trabajos ni editar tareas. Anotálo en algún lugar seguro." />
+          <ObHeader icon={<Lock size={22} />} title="PIN de admin" subtitle="4 dígitos. Anotálo en algún lugar seguro." />
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
             <input type="password" inputMode="numeric" maxLength={4} autoFocus className="ob-pin" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="• • • •" />
             <div style={{ fontSize: '12px', color: '#8A7560', marginTop: '12px' }}>{pin.length}/4 dígitos</div>
@@ -173,22 +307,24 @@ function OnboardingFlow({ onComplete }) {
       )}
 
       {step === 6 && (
-        <FamilySummary adults={adults} kids={kids} helpers={helpers} bonusPct={bonusPct} pin={pin}
-          onBack={() => setStep(5)} onFinish={finish} />
+        <FamilySummary adults={adults} kids={kids} helpers={helpers} bonusPct={bonusPct} pin={pin} onBack={() => setStep(5)} onFinish={finish} />
       )}
     </OnboardingShell>
   );
 }
 
 // ============================================================================
-// COMPONENTES SHARED DE ONBOARDING + EDITOR
+// COMPONENTES SHARED
 // ============================================================================
 
-function OnboardingShell({ children }) {
+function OnboardingShell({ children, familyCode, onResetFamily }) {
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #FFF8EE 0%, #FDFAF3 50%, #FFE8D6 100%)', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"DM Sans", -apple-system, sans-serif', color: '#3D2E1F' }}>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #FFF8EE 0%, #FDFAF3 50%, #FFE8D6 100%)', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"DM Sans", -apple-system, sans-serif', color: '#3D2E1F', position: 'relative' }}>
       <SharedStyles />
       <div className="ob-card">{children}</div>
+      {familyCode && onResetFamily && (
+        <button onClick={onResetFamily} style={{ position: 'absolute', top: '16px', right: '16px', background: 'rgba(255,255,255,0.6)', border: '1px solid #E8DEC9', borderRadius: '999px', padding: '6px 12px', fontSize: '11px', color: '#8A7560', cursor: 'pointer' }}>Salir</button>
+      )}
     </div>
   );
 }
@@ -217,9 +353,7 @@ function SharedStyles() {
       .step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E8DEC9; transition: all 0.2s; }
       .step-dot.active { background: #3D2E1F; transform: scale(1.4); }
       .step-dot.done { background: #7BA05B; }
-      @media (max-width: 600px) {
-        .ob-card { padding: 28px 22px; border-radius: 22px; }
-      }
+      @media (max-width: 600px) { .ob-card { padding: 28px 22px; border-radius: 22px; } }
     `}</style>
   );
 }
@@ -273,7 +407,7 @@ function PersonForm({ person, index, canRemove, onRemove, onUpdate, usedColors, 
       {showYoung && (
         <div style={{ display: 'flex', gap: '6px' }}>
           <button type="button" className={`ob-toggle ${!person.young ? 'selected' : ''}`} onClick={() => onUpdate('young', false)}>Vista normal</button>
-          <button type="button" className={`ob-toggle ${person.young ? 'selected' : ''}`} onClick={() => onUpdate('young', true)}>Vista más simple (≤5 años)</button>
+          <button type="button" className={`ob-toggle ${person.young ? 'selected' : ''}`} onClick={() => onUpdate('young', true)}>Vista simple (≤5 años)</button>
         </div>
       )}
     </div>
@@ -294,21 +428,7 @@ function BonusPicker({ value, onChange }) {
     <div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
         {options.map(opt => (
-          <button key={opt} type="button" onClick={() => onChange(opt)}
-            style={{
-              padding: '10px 14px',
-              borderRadius: '10px',
-              border: value === opt ? '2px solid #3D2E1F' : '2px solid #E8DEC9',
-              background: value === opt ? '#3D2E1F' : 'white',
-              color: value === opt ? '#FDFAF3' : '#3D2E1F',
-              cursor: 'pointer',
-              fontFamily: 'Fraunces, serif',
-              fontSize: '15px',
-              fontWeight: 700,
-              transform: value === opt ? 'scale(1.05)' : 'none',
-              transition: 'all 0.15s',
-              minWidth: '52px',
-            }}>
+          <button key={opt} type="button" onClick={() => onChange(opt)} style={{ padding: '10px 14px', borderRadius: '10px', border: value === opt ? '2px solid #3D2E1F' : '2px solid #E8DEC9', background: value === opt ? '#3D2E1F' : 'white', color: value === opt ? '#FDFAF3' : '#3D2E1F', cursor: 'pointer', fontFamily: 'Fraunces, serif', fontSize: '15px', fontWeight: 700, transform: value === opt ? 'scale(1.05)' : 'none', transition: 'all 0.15s', minWidth: '52px' }}>
             {opt === 0 ? 'Sin bonus' : `+${opt}%`}
           </button>
         ))}
@@ -321,30 +441,30 @@ function BonusPicker({ value, onChange }) {
 }
 
 function FamilySummary({ adults, kids, helpers, bonusPct, pin, onBack, onFinish }) {
+  const [saving, setSaving] = useState(false);
+  const handleFinish = async () => { setSaving(true); await onFinish(); };
   return (
     <div>
       <div className="serif" style={{ fontFamily: 'Fraunces, serif', fontSize: '24px', fontWeight: 700, marginBottom: '6px' }}>Tu familia</div>
-      <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '20px' }}>Revisá que esté todo bien antes de empezar. Después podés editar desde Ajustes.</p>
-
+      <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '20px' }}>Revisá que esté todo bien. Después podés editar desde Ajustes.</p>
       <div style={{ background: '#FBF5E9', padding: '16px', borderRadius: '14px', marginBottom: '20px' }}>
         <SummarySection title={`Adultos (${adults.length})`} people={adults} showLock />
         <SummarySection title={`Hijos (${kids.length})`} people={kids} showYoung style={{ marginTop: '14px' }} />
         {helpers.length > 0 && <SummarySection title={`Ayuda (${helpers.length})`} people={helpers} style={{ marginTop: '14px' }} />}
       </div>
-
       <div style={{ background: '#FFF4E0', padding: '12px 14px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
         <Award size={16} color="#A67C12" />
-        <span style={{ fontSize: '13px', color: '#6B4F18' }}>Bonus por rutina completa: <strong>+{bonusPct}%</strong></span>
+        <span style={{ fontSize: '13px', color: '#6B4F18' }}>Bonus: <strong>+{bonusPct}%</strong></span>
       </div>
-
       <div style={{ background: '#3D2E1F', color: '#FDFAF3', padding: '12px 14px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
         <Lock size={16} />
         <span style={{ fontSize: '13px' }}>PIN admin: <strong style={{ fontFamily: 'Fraunces, serif' }}>{pin}</strong></span>
       </div>
-
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
-        <button className="ob-btn ob-btn-ghost" onClick={onBack}>Atrás</button>
-        <button className="ob-btn" onClick={onFinish} style={{ background: '#7BA05B' }}>Empezar a usar <Sparkles size={18} /></button>
+        <button className="ob-btn ob-btn-ghost" onClick={onBack} disabled={saving}>Atrás</button>
+        <button className="ob-btn" onClick={handleFinish} style={{ background: '#7BA05B' }} disabled={saving}>
+          {saving ? 'Guardando...' : 'Empezar a usar'} <Sparkles size={18} />
+        </button>
       </div>
     </div>
   );
@@ -359,18 +479,18 @@ function SummarySection({ title, people, showLock = false, showYoung = false, st
           <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: p.color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Fraunces, serif' }}>{p.name.charAt(0).toUpperCase()}</div>
           <span style={{ fontSize: '14px' }}>{p.name}</span>
           {showLock && <Lock size={12} color="#8A7560" style={{ marginLeft: 'auto' }} />}
-          {showYoung && p.young && <span style={{ fontSize: '10px', background: '#FFF4E0', color: '#A67C12', padding: '2px 8px', borderRadius: '999px', fontWeight: 600, marginLeft: 'auto' }}>Vista simple</span>}
+          {showYoung && p.young && <span style={{ fontSize: '10px', background: '#FFF4E0', color: '#A67C12', padding: '2px 8px', borderRadius: '999px', fontWeight: 600, marginLeft: 'auto' }}>Simple</span>}
         </div>
       ))}
     </div>
   );
 }
-
 // ============================================================================
-// MAIN APP
+// MAIN APP (con sync en tiempo real)
 // ============================================================================
 
-function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
+function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
+  const familyConfig = cloudData.config;
   const family = buildFamilyFromOnboarding(familyConfig);
   const adultKeys = familyConfig.adults.map(a => a.id);
   const kidKeys = familyConfig.kids.map(k => k.id);
@@ -378,32 +498,55 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
   const normalKidKeys = familyConfig.kids.filter(k => !k.young).map(k => k.id);
   const bonusPct = familyConfig.bonusPct ?? DEFAULT_BONUS_PCT;
 
+  // Datos vienen de la nube
+  const tasks = cloudData.tasks || [];
+  const routines = cloudData.routines || {};
+  const bigJobs = cloudData.bigJobs || [];
+  const events = cloudData.events || [];
+  const lists = cloudData.lists || [];
+  const points = cloudData.points || (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
+  const money = cloudData.money || (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
+  const history = cloudData.history || [];
+  const jobInstances = cloudData.jobInstances || [];
+
+  // Función para guardar en la nube cualquier cambio
+  const saveToCloud = (updates) => {
+    const newData = {
+      config: familyConfig,
+      tasks, routines, bigJobs, events, lists, points, money, history, jobInstances,
+      ...updates,
+    };
+    saveFamilyData(familyCode, newData);
+  };
+
+  const setTasks = (v) => saveToCloud({ tasks: typeof v === 'function' ? v(tasks) : v });
+  const setRoutines = (v) => saveToCloud({ routines: typeof v === 'function' ? v(routines) : v });
+  const setBigJobs = (v) => saveToCloud({ bigJobs: typeof v === 'function' ? v(bigJobs) : v });
+  const setEvents = (v) => saveToCloud({ events: typeof v === 'function' ? v(events) : v });
+  const setLists = (v) => saveToCloud({ lists: typeof v === 'function' ? v(lists) : v });
+  const setPoints = (v) => saveToCloud({ points: typeof v === 'function' ? v(points) : v });
+  const setMoney = (v) => saveToCloud({ money: typeof v === 'function' ? v(money) : v });
+  const setHistory = (v) => saveToCloud({ history: typeof v === 'function' ? v(history) : v });
+  const setJobInstances = (v) => saveToCloud({ jobInstances: typeof v === 'function' ? v(jobInstances) : v });
+
+  const setFamilyConfig = (newConfig) => {
+    saveToCloud({ config: newConfig });
+  };
+
+  // Cuando llega cloudData, sincronizar PIN local con el de la familia
+  useEffect(() => {
+    const stored = getStoredFamilyPin(familyCode);
+    if (stored) {
+      setInitialAdminPin(stored);
+    }
+  }, [familyCode]);
+
   const [activeUser, setActiveUser] = useState(() => {
     const stored = loadState('activeUser', null);
     if (stored && family[stored]) return stored;
     return adultKeys[0];
   });
-  const [tasks, setTasks] = useState(() => loadState('tasks', []));
-  const [routines, setRoutines] = useState(() => loadState('routines', {}));
-  const [bigJobs, setBigJobs] = useState(() => loadState('bigJobs', []));
-  const [events, setEvents] = useState(() => loadState('events', []));
-  const [lists, setLists] = useState(() => loadState('lists', []));
-  const [points, setPoints] = useState(() => {
-    const stored = loadState('points', null);
-    if (stored) return stored;
-    const init = {};
-    kidKeys.forEach(k => { init[k] = 0; });
-    return init;
-  });
-  const [money, setMoney] = useState(() => {
-    const stored = loadState('money', null);
-    if (stored) return stored;
-    const init = {};
-    kidKeys.forEach(k => { init[k] = 0; });
-    return init;
-  });
-  const [history, setHistory] = useState(() => loadState('history', []));
-  const [jobInstances, setJobInstances] = useState(() => loadState('jobInstances', []));
+  useEffect(() => saveState('activeUser', activeUser), [activeUser]);
 
   const [activeTab, setActiveTab] = useState('today');
   const [time, setTime] = useState(new Date());
@@ -416,17 +559,6 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
   const [weather, setWeather] = useState(null);
   const [location, setLocation] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-
-  useEffect(() => saveState('activeUser', activeUser), [activeUser]);
-  useEffect(() => saveState('tasks', tasks), [tasks]);
-  useEffect(() => saveState('routines', routines), [routines]);
-  useEffect(() => saveState('bigJobs', bigJobs), [bigJobs]);
-  useEffect(() => saveState('events', events), [events]);
-  useEffect(() => saveState('lists', lists), [lists]);
-  useEffect(() => saveState('points', points), [points]);
-  useEffect(() => saveState('money', money), [money]);
-  useEffect(() => saveState('history', history), [history]);
-  useEffect(() => saveState('jobInstances', jobInstances), [jobInstances]);
 
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 60000); return () => clearInterval(t); }, []);
   useEffect(() => { getLocation().then(loc => { setLocation(loc); fetchWeather(loc.lat, loc.lon).then(setWeather); }); }, []);
@@ -457,15 +589,7 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
     const particles = [];
     const colors = [color, '#F5B645', '#E87A93', '#F09872', '#7BA05B', '#E8804F', '#5B96B0'];
     for (let i = 0; i < Math.floor(20 * intensity); i++) {
-      particles.push({
-        id: Math.random() + i, x, y,
-        tx: (Math.random() - 0.5) * 350 * intensity,
-        ty: -Math.random() * 280 - 80,
-        rot: Math.random() * 720 - 360,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        size: Math.random() * 8 + 6,
-        shape: Math.random() > 0.5 ? '50%' : '2px',
-      });
+      particles.push({ id: Math.random() + i, x, y, tx: (Math.random() - 0.5) * 350 * intensity, ty: -Math.random() * 280 - 80, rot: Math.random() * 720 - 360, color: colors[Math.floor(Math.random() * colors.length)], size: Math.random() * 8 + 6, shape: Math.random() > 0.5 ? '50%' : '2px' });
     }
     setConfetti(prev => [...prev, ...particles]);
     setTimeout(() => setConfetti(prev => prev.filter(p => !particles.find(np => np.id === p.id))), 1400);
@@ -483,11 +607,11 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
   const toggleTask = (taskId, e) => {
     const task = tasks.find(t => t.id === taskId);
     const existing = history.find(h => h.kind === 'task' && h.templateId === taskId && h.date === tk);
-    if (existing) setHistory(history.filter(h => h.id !== existing.id));
+    if (existing) saveToCloud({ history: history.filter(h => h.id !== existing.id) });
     else {
       const rect = e.currentTarget.getBoundingClientRect();
       triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[task.who].color);
-      setHistory([...history, { id: Date.now(), kind: 'task', templateId: taskId, date: tk, who: task.who }]);
+      saveToCloud({ history: [...history, { id: Date.now(), kind: 'task', templateId: taskId, date: tk, who: task.who }] });
     }
   };
 
@@ -501,22 +625,26 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
 
     if (existing) {
       const wasAllDone = todays.every(r => r.done);
-      setHistory(history.filter(h => h.id !== existing.id));
       let toSubtract = itemPoints;
       if (wasAllDone && dayBonus > 0) toSubtract += dayBonus;
-      setPoints(p => ({ ...p, [kid]: Math.max(0, (p[kid] || 0) - toSubtract) }));
+      saveToCloud({
+        history: history.filter(h => h.id !== existing.id),
+        points: { ...points, [kid]: Math.max(0, (points[kid] || 0) - toSubtract) },
+      });
     } else {
       const rect = e.currentTarget.getBoundingClientRect();
       const willAllBeDone = todays.every(r => r.id === itemId || r.done);
       triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[kid].color);
       triggerPointsAnimation(rect.left + rect.width/2, rect.top + rect.height/2, kid, itemPoints);
-      setHistory([...history, { id: Date.now(), kind: 'routine', templateId: itemId, date: tk, who: kid, points: itemPoints }]);
       let toAdd = itemPoints;
       if (willAllBeDone && dayBonus > 0) {
         toAdd += dayBonus;
         triggerBigCelebration(family[kid].name, family[kid].color, `¡Rutina completa! +${dayBonus} bonus`);
       }
-      setPoints(p => ({ ...p, [kid]: (p[kid] || 0) + toAdd }));
+      saveToCloud({
+        history: [...history, { id: Date.now(), kind: 'routine', templateId: itemId, date: tk, who: kid, points: itemPoints }],
+        points: { ...points, [kid]: (points[kid] || 0) + toAdd },
+      });
     }
   };
 
@@ -534,11 +662,11 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
     const job = bigJobs.find(j => j.id === jobId);
     const rect = e.currentTarget.getBoundingClientRect();
     triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[job.who].color, 0.8);
-    setJobInstances(prev => {
-      const existing = prev.find(i => i.jobId === jobId && i.date === tk);
-      if (existing) return prev.map(i => i.id === existing.id ? { ...i, status: 'review' } : i);
-      return [...prev, { id: `j${jobId}-${tk}`, jobId, date: tk, status: 'review' }];
-    });
+    const existing = jobInstances.find(i => i.jobId === jobId && i.date === tk);
+    let newJobInstances;
+    if (existing) newJobInstances = jobInstances.map(i => i.id === existing.id ? { ...i, status: 'review' } : i);
+    else newJobInstances = [...jobInstances, { id: `j${jobId}-${tk}`, jobId, date: tk, status: 'review' }];
+    saveToCloud({ jobInstances: newJobInstances });
   };
 
   const validateJob = (jobId, e) => {
@@ -553,23 +681,22 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
   const actuallyValidateJob = (jobId, rect) => {
     const job = bigJobs.find(j => j.id === jobId);
     if (rect) triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[job.who].color, 1.5);
-    triggerBigCelebration(family[job.who].name, family[job.who].color,
-      job.reward.type === 'money' ? `+${formatMoney(job.reward.value)}` : `+${job.reward.value} puntos`);
-    if (job.reward.type === 'points') setPoints(p => ({ ...p, [job.who]: (p[job.who] || 0) + job.reward.value }));
-    else setMoney(m => ({ ...m, [job.who]: (m[job.who] || 0) + job.reward.value }));
-    setJobInstances(prev => prev.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'done' } : i));
-    setHistory(prev => [...prev, {
-      id: Date.now(), kind: 'job', templateId: jobId, date: tk, who: job.who, title: job.title,
-      ...(job.reward.type === 'points' ? { points: job.reward.value } : { money: job.reward.value })
-    }]);
+    triggerBigCelebration(family[job.who].name, family[job.who].color, job.reward.type === 'money' ? `+${formatMoney(job.reward.value)}` : `+${job.reward.value} puntos`);
+    const updates = {
+      jobInstances: jobInstances.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'done' } : i),
+      history: [...history, { id: Date.now(), kind: 'job', templateId: jobId, date: tk, who: job.who, title: job.title, ...(job.reward.type === 'points' ? { points: job.reward.value } : { money: job.reward.value }) }],
+    };
+    if (job.reward.type === 'points') updates.points = { ...points, [job.who]: (points[job.who] || 0) + job.reward.value };
+    else updates.money = { ...money, [job.who]: (money[job.who] || 0) + job.reward.value };
+    saveToCloud(updates);
   };
   const rejectJob = (jobId) => {
-    if (!isAdmin) { requestPin(() => setJobInstances(prev => prev.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'pending' } : i))); return; }
-    setJobInstances(prev => prev.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'pending' } : i));
+    const apply = () => saveToCloud({ jobInstances: jobInstances.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'pending' } : i) });
+    if (!isAdmin) requestPin(apply);
+    else apply();
   };
 
   const requestPin = (onSuccess) => setPinPrompt({ onSuccess });
-
   const tryAdminLogin = (userId) => {
     if (family[userId]?.isAdmin) requestPin(() => setActiveUser(userId));
     else setActiveUser(userId);
@@ -620,32 +747,26 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
   const deleteListItem = (listId, itemId) => setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => i.id !== itemId) } : l));
   const clearCompletedItems = (listId) => setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => !i.done) } : l));
 
-  // === EDITAR FAMILIA ===
   const updateFamilyConfig = (newConfig) => {
-    // Limpiar datos asociados a miembros eliminados
     const allNewIds = [...newConfig.adults, ...newConfig.kids, ...newConfig.helpers].map(p => p.id);
-    setTasks(prev => prev.filter(t => allNewIds.includes(t.who)));
-    setBigJobs(prev => prev.filter(j => allNewIds.includes(j.who)));
-    setEvents(prev => prev.filter(e => allNewIds.includes(e.who)));
-    setHistory(prev => prev.filter(h => allNewIds.includes(h.who)));
-    setRoutines(prev => {
-      const cleaned = {};
-      Object.keys(prev).forEach(k => { if (allNewIds.includes(k)) cleaned[k] = prev[k]; });
-      return cleaned;
-    });
     const newKidKeys = newConfig.kids.map(k => k.id);
-    setPoints(prev => {
-      const cleaned = {};
-      newKidKeys.forEach(k => { cleaned[k] = prev[k] || 0; });
-      return cleaned;
-    });
-    setMoney(prev => {
-      const cleaned = {};
-      newKidKeys.forEach(k => { cleaned[k] = prev[k] || 0; });
-      return cleaned;
+    const cleanedRoutines = {};
+    Object.keys(routines).forEach(k => { if (allNewIds.includes(k)) cleanedRoutines[k] = routines[k]; });
+    const cleanedPoints = {};
+    newKidKeys.forEach(k => { cleanedPoints[k] = points[k] || 0; });
+    const cleanedMoney = {};
+    newKidKeys.forEach(k => { cleanedMoney[k] = money[k] || 0; });
+    saveToCloud({
+      config: newConfig,
+      tasks: tasks.filter(t => allNewIds.includes(t.who)),
+      bigJobs: bigJobs.filter(j => allNewIds.includes(j.who)),
+      events: events.filter(e => allNewIds.includes(e.who)),
+      history: history.filter(h => allNewIds.includes(h.who)),
+      routines: cleanedRoutines,
+      points: cleanedPoints,
+      money: cleanedMoney,
     });
     if (!allNewIds.includes(activeUser)) setActiveUser(newConfig.adults[0]?.id || allNewIds[0]);
-    setFamilyConfig(newConfig);
   };
 
   const w = weather ? weatherCodeToInfo(weather.code) : null;
@@ -653,13 +774,8 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
   return (
     <div style={{ fontFamily: '"DM Sans", -apple-system, sans-serif', background: '#FDFAF3', minHeight: '100vh', color: '#3D2E1F', position: 'relative', overflowX: 'hidden' }}>
       <MainStyles />
-
-      {confetti.map(p => (
-        <div key={p.id} className="confetti-particle" style={{ left: p.x, top: p.y, width: p.size, height: p.size, background: p.color, borderRadius: p.shape, '--tx': `${p.tx}px`, '--ty': `${p.ty}px`, '--rot': `${p.rot}deg` }}/>
-      ))}
-      {pointsAnimation.map(p => (
-        <div key={p.id} className="points-fly" style={{ left: p.x, top: p.y, color: p.color }}>+{p.value} pt</div>
-      ))}
+      {confetti.map(p => (<div key={p.id} className="confetti-particle" style={{ left: p.x, top: p.y, width: p.size, height: p.size, background: p.color, borderRadius: p.shape, '--tx': `${p.tx}px`, '--ty': `${p.ty}px`, '--rot': `${p.rot}deg` }}/>))}
+      {pointsAnimation.map(p => (<div key={p.id} className="points-fly" style={{ left: p.x, top: p.y, color: p.color }}>+{p.value} pt</div>))}
       {bigCelebration && (
         <div className="big-celebration">
           <div style={{ background: 'white', borderRadius: '32px', padding: '40px 60px', boxShadow: `0 20px 60px ${bigCelebration.color}40`, textAlign: 'center', minWidth: '300px', maxWidth: '92vw' }}>
@@ -690,15 +806,18 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
               ))}
               {isAdmin && <button onClick={() => setShowSettings(true)} title="Ajustes" style={{ background: '#8A7560', width: '34px', height: '34px' }}><SettingsIcon size={16} /></button>}
             </div>
-            {weather && w && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'white', padding: '8px 14px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(61,46,31,0.04)' }}>
-                <div style={{ fontSize: '24px' }}>{w.emoji}</div>
-                <div>
-                  <div className="serif" style={{ fontSize: '18px', fontWeight: 600, lineHeight: 1 }}>{weather.temp}°</div>
-                  <div style={{ fontSize: '10px', color: '#8A7560', marginTop: '2px' }}>{location?.name || 'Tu zona'}</div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <SyncIndicator status={syncStatus} />
+              {weather && w && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'white', padding: '8px 14px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(61,46,31,0.04)' }}>
+                  <div style={{ fontSize: '24px' }}>{w.emoji}</div>
+                  <div>
+                    <div className="serif" style={{ fontSize: '18px', fontWeight: 600, lineHeight: 1 }}>{weather.temp}°</div>
+                    <div style={{ fontSize: '10px', color: '#8A7560', marginTop: '2px' }}>{location?.name || 'Tu zona'}</div>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -735,8 +854,7 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
           const Icon = tab.icon;
           return (
             <button key={tab.id} className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
-              <Icon size={18} />
-              <span>{tab.label}</span>
+              <Icon size={18} /><span>{tab.label}</span>
             </button>
           );
         })}
@@ -748,9 +866,30 @@ function MainApp({ familyConfig, setFamilyConfig, onResetFamily }) {
       {modal && modal.type === 'routine' && <RoutineModal data={modal.data} member={modal.member} memberData={family[modal.member]} onSave={(d) => saveRoutineItem(modal.member, d)} onDelete={(id) => deleteRoutineItem(modal.member, id)} onClose={() => setModal(null)} />}
       {modal && modal.type === 'list' && <ListModal data={modal.data} onSave={saveList} onDelete={deleteList} onClose={() => setModal(null)} />}
       {modal && modal.type === 'listItem' && <ListItemModal data={modal.data} listId={modal.listId} onSave={(d) => saveListItem(modal.listId, d)} onClose={() => setModal(null)} />}
-
       {pinPrompt && <PinPrompt onSuccess={() => { pinPrompt.onSuccess(); setPinPrompt(null); }} onCancel={() => setPinPrompt(null)} />}
-      {showSettings && <SettingsModal config={familyConfig} onUpdate={updateFamilyConfig} onClose={() => setShowSettings(false)} onResetFamily={onResetFamily} />}
+      {showSettings && <SettingsModal config={familyConfig} familyCode={familyCode} onUpdate={updateFamilyConfig} onClose={() => setShowSettings(false)} onResetFamily={onResetFamily} />}
+    </div>
+  );
+}
+
+function SyncIndicator({ status }) {
+  if (status === 'connected') {
+    return (
+      <div title="Sincronizado con la nube" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#EDF4E2', color: '#3D5C26', padding: '6px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 600 }}>
+        <Cloud size={12} /> Sincronizado
+      </div>
+    );
+  }
+  if (status === 'connecting') {
+    return (
+      <div title="Conectando..." style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#FFF4E0', color: '#A67C12', padding: '6px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 600 }}>
+        <Wifi size={12} /> Conectando...
+      </div>
+    );
+  }
+  return (
+    <div title="Sin conexión" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#FCEBE6', color: '#C0392B', padding: '6px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: 600 }}>
+      <CloudOff size={12} /> Sin conexión
     </div>
   );
 }
@@ -810,7 +949,6 @@ function MainStyles() {
       .editor-row { background: #FBF5E9; padding: 12px; border-radius: 10px; margin-bottom: 8px; }
       .tab-pill { padding: 8px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600; border: 1.5px solid #E8DEC9; background: white; color: #3D2E1F; }
       .tab-pill.selected { background: #3D2E1F; color: white; border-color: #3D2E1F; }
-
       .app-container { max-width: 1600px; margin: 0 auto; }
       .header-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 24px; padding: 20px 32px 16px; }
       .header-row > .header-left { justify-self: start; }
@@ -823,58 +961,15 @@ function MainStyles() {
       .view-bar { padding: 0 32px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .main-content { padding: 0 32px 110px; }
       .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(253,250,243,0.92); backdrop-filter: blur(20px); border-top: 1px solid rgba(61,46,31,0.08); padding: 10px 12px; display: flex; justify-content: center; gap: 2px; flex-wrap: wrap; z-index: 50; }
-
-      @media (max-width: 1280px) {
-        .clock { font-size: 42px; }
-        .logo-text, .logo-symbol { font-size: 22px; }
-        .header-row { padding: 16px 24px 12px; gap: 16px; }
-        .view-bar { padding: 0 24px 12px; }
-        .main-content { padding: 0 24px 110px; }
-      }
-      @media (max-width: 1024px) {
-        .clock { font-size: 38px; }
-        .date-text { font-size: 14px; }
-        .logo-text, .logo-symbol { font-size: 20px; }
-        .header-row { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; align-items: start; gap: 12px; padding: 14px 20px 10px; }
-        .header-row > .header-left { grid-column: 1; grid-row: 1; }
-        .header-row > .header-right { grid-column: 2; grid-row: 1; }
-        .header-row > .header-center { grid-column: 1 / -1; grid-row: 2; justify-self: center; padding: 0; margin-top: 4px; }
-        .view-bar { padding: 0 20px 12px; }
-        .main-content { padding: 0 20px 100px; }
-        .tab-btn { padding: 8px 10px; font-size: 11px; min-width: 52px; }
-      }
-      @media (max-width: 900px) {
-        .clock { font-size: 34px; }
-        .header-row { grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 8px; padding: 12px 16px 8px; }
-        .header-row > .header-left, .header-row > .header-right { grid-column: 1; justify-self: stretch; }
-        .header-row > .header-center { grid-column: 1; grid-row: 1; justify-self: center; margin-bottom: 2px; }
-        .header-row > .header-left { grid-row: 2; }
-        .header-row > .header-right { grid-row: 3; display: flex !important; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; gap: 8px !important; }
-        .view-bar { padding: 0 16px 10px; gap: 6px; }
-        .main-content { padding: 0 16px 96px; }
-        .card { padding: 18px; border-radius: 18px; }
-        .tab-btn span { font-size: 10px; }
-      }
-      @media (max-width: 500px) {
-        .clock { font-size: 30px; }
-        .date-text { font-size: 13px; }
-        .logo-text, .logo-symbol { font-size: 18px; }
-        .header-row { padding: 10px 12px 6px; }
-        .view-bar { padding: 0 12px 8px; gap: 5px; }
-        .view-bar .pill { padding: 5px 10px !important; font-size: 11px; }
-        .main-content { padding: 0 12px 90px; }
-        .card { padding: 14px; border-radius: 16px; }
-        .bottom-nav { padding: 8px 4px; gap: 0; }
-        .tab-btn { padding: 6px 2px; min-width: 0; flex: 1; }
-        .tab-btn span { font-size: 9px; }
-        .modal-box { padding: 20px; border-radius: 18px; }
-        .pin-input { width: 160px; height: 60px; font-size: 26px; }
-        .user-switcher button { width: 32px; height: 32px; font-size: 12px; }
-        .avatar { width: 32px; height: 32px; font-size: 13px; }
-      }
+      @media (max-width: 1280px) { .clock { font-size: 42px; } .logo-text, .logo-symbol { font-size: 22px; } .header-row { padding: 16px 24px 12px; gap: 16px; } .view-bar { padding: 0 24px 12px; } .main-content { padding: 0 24px 110px; } }
+      @media (max-width: 1024px) { .clock { font-size: 38px; } .date-text { font-size: 14px; } .logo-text, .logo-symbol { font-size: 20px; } .header-row { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; align-items: start; gap: 12px; padding: 14px 20px 10px; } .header-row > .header-left { grid-column: 1; grid-row: 1; } .header-row > .header-right { grid-column: 2; grid-row: 1; } .header-row > .header-center { grid-column: 1 / -1; grid-row: 2; justify-self: center; padding: 0; margin-top: 4px; } .view-bar { padding: 0 20px 12px; } .main-content { padding: 0 20px 100px; } .tab-btn { padding: 8px 10px; font-size: 11px; min-width: 52px; } }
+      @media (max-width: 900px) { .clock { font-size: 34px; } .header-row { grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 8px; padding: 12px 16px 8px; } .header-row > .header-left, .header-row > .header-right { grid-column: 1; justify-self: stretch; } .header-row > .header-center { grid-column: 1; grid-row: 1; justify-self: center; margin-bottom: 2px; } .header-row > .header-left { grid-row: 2; } .header-row > .header-right { grid-row: 3; display: flex !important; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; gap: 8px !important; } .view-bar { padding: 0 16px 10px; gap: 6px; } .main-content { padding: 0 16px 96px; } .card { padding: 18px; border-radius: 18px; } .tab-btn span { font-size: 10px; } }
+      @media (max-width: 500px) { .clock { font-size: 30px; } .date-text { font-size: 13px; } .logo-text, .logo-symbol { font-size: 18px; } .header-row { padding: 10px 12px 6px; } .view-bar { padding: 0 12px 8px; gap: 5px; } .view-bar .pill { padding: 5px 10px !important; font-size: 11px; } .main-content { padding: 0 12px 90px; } .card { padding: 14px; border-radius: 16px; } .bottom-nav { padding: 8px 4px; gap: 0; } .tab-btn { padding: 6px 2px; min-width: 0; flex: 1; } .tab-btn span { font-size: 9px; } .modal-box { padding: 20px; border-radius: 18px; } .pin-input { width: 160px; height: 60px; font-size: 26px; } .user-switcher button { width: 32px; height: 32px; font-size: 12px; } .avatar { width: 32px; height: 32px; font-size: 13px; } }
     `}</style>
   );
-}// ============================================================================
+}
+
+// ============================================================================
 // VIEWS
 // ============================================================================
 
@@ -936,12 +1031,10 @@ function TodayView({ family, kidKeys, events, tasks, points, toggleTask }) {
 function CalendarView({ family, events, isAdmin, setModal }) {
   const days = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
   const todayDow = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
-  const dates = [];
-  const weekDates = [];
+  const dates = []; const weekDates = [];
   for (let i = -todayDow; i < 7 - todayDow; i++) {
     const d = new Date(); d.setDate(d.getDate() + i); d.setHours(0,0,0,0);
-    dates.push(d.getDate());
-    weekDates.push(d);
+    dates.push(d.getDate()); weekDates.push(d);
   }
   return (
     <div className="card">
@@ -1111,7 +1204,6 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
 function JobsView({ family, kidKeys, bigJobs, todaysJobs, submitJob, validateJob, rejectJob, money, points, isAdmin, setModal }) {
   const pending = todaysJobs.filter(j => j.status === 'pending');
   const review = todaysJobs.filter(j => j.status === 'review');
-
   return (
     <div>
       {kidKeys.length > 0 && (
@@ -1125,14 +1217,8 @@ function JobsView({ family, kidKeys, bigJobs, todaysJobs, submitJob, validateJob
                   <div className="serif" style={{ fontSize: '20px', fontWeight: 600 }}>{m.name}</div>
                 </div>
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontSize: '10px', color: '#8A7560', fontWeight: 600 }}><Star size={11} style={{ display: 'inline' }}/> PUNTOS</div>
-                    <div className="serif" style={{ fontSize: '22px', fontWeight: 700, color: m.color }}>{points[k] || 0}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '10px', color: '#8A7560', fontWeight: 600 }}><DollarSign size={11} style={{ display: 'inline' }}/> DINERO</div>
-                    <div className="serif" style={{ fontSize: '22px', fontWeight: 700 }}>{formatMoney(money[k] || 0)}</div>
-                  </div>
+                  <div><div style={{ fontSize: '10px', color: '#8A7560', fontWeight: 600 }}><Star size={11} style={{ display: 'inline' }}/> PUNTOS</div><div className="serif" style={{ fontSize: '22px', fontWeight: 700, color: m.color }}>{points[k] || 0}</div></div>
+                  <div><div style={{ fontSize: '10px', color: '#8A7560', fontWeight: 600 }}><DollarSign size={11} style={{ display: 'inline' }}/> DINERO</div><div className="serif" style={{ fontSize: '22px', fontWeight: 700 }}>{formatMoney(money[k] || 0)}</div></div>
                 </div>
               </div>
             );
@@ -1255,15 +1341,8 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
   const monthHist = history.filter(h => h.date.startsWith(currentMonth));
   const stats = kidKeys.map(k => {
     const kidHist = monthHist.filter(h => h.who === k);
-    return {
-      k, ...family[k],
-      routinesDone: kidHist.filter(h => h.kind === 'routine').length,
-      jobsDone: kidHist.filter(h => h.kind === 'job').length,
-      moneyEarned: kidHist.reduce((s, h) => s + (h.money || 0), 0),
-      pointsEarned: kidHist.reduce((s, h) => s + (h.points || 0), 0),
-    };
+    return { k, ...family[k], routinesDone: kidHist.filter(h => h.kind === 'routine').length, jobsDone: kidHist.filter(h => h.kind === 'job').length, moneyEarned: kidHist.reduce((s, h) => s + (h.money || 0), 0), pointsEarned: kidHist.reduce((s, h) => s + (h.points || 0), 0) };
   });
-
   const getTitle = (h) => {
     if (h.title) return h.title;
     if (h.kind === 'task') return tasks.find(t => t.id === h.templateId)?.text || '?';
@@ -1274,10 +1353,8 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
     }
     return '?';
   };
-
   const kindLabel = { task: 'Tarea', routine: 'Rutina', job: 'Trabajo' };
   const kindColor = { task: '#5B96B0', routine: '#F5B645', job: '#7BA05B' };
-
   return (
     <div>
       <div className="serif" style={{ fontSize: '28px', fontWeight: 600, marginBottom: '16px' }}>Historial del mes</div>
@@ -1299,7 +1376,6 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
           ))}
         </div>
       )}
-
       <div className="card">
         <div className="serif" style={{ fontSize: '20px', fontWeight: 600, marginBottom: '14px' }}>Actividad reciente</div>
         {filtered.length === 0 && <div style={{ color: '#8A7560' }}>Aún no hay actividad registrada.</div>}
@@ -1338,9 +1414,7 @@ function PinPrompt({ onSuccess, onCancel }) {
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '420px', textAlign: 'center' }}>
-        <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#3D2E1F', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-          <Lock size={28} color="#FDFAF3" />
-        </div>
+        <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#3D2E1F', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}><Lock size={28} color="#FDFAF3" /></div>
         <div className="serif" style={{ fontSize: '24px', fontWeight: 600, marginBottom: '8px' }}>PIN de admin</div>
         <div style={{ fontSize: '14px', color: '#8A7560', marginBottom: '24px' }}>Ingresá el PIN para continuar</div>
         <div style={{ marginBottom: '20px' }}>
@@ -1353,62 +1427,39 @@ function PinPrompt({ onSuccess, onCancel }) {
   );
 }
 
-function SettingsModal({ config, onUpdate, onClose, onResetFamily }) {
-  const [tab, setTab] = useState('family');
+function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily }) {
+  const [tab, setTab] = useState('share');
   const [editConfig, setEditConfig] = useState(JSON.parse(JSON.stringify(config)));
   const [pinChange, setPinChange] = useState({ current: '', newPin: '', confirm: '', message: null });
+  const [copied, setCopied] = useState(false);
 
   const usedColors = getUsedColors(editConfig);
 
   const updateAdult = (i, field, value) => setEditConfig({ ...editConfig, adults: editConfig.adults.map((a, idx) => idx === i ? { ...a, [field]: value } : a) });
   const updateKid = (i, field, value) => setEditConfig({ ...editConfig, kids: editConfig.kids.map((k, idx) => idx === i ? { ...k, [field]: value } : k) });
   const updateHelper = (i, field, value) => setEditConfig({ ...editConfig, helpers: editConfig.helpers.map((h, idx) => idx === i ? { ...h, [field]: value } : h) });
-
-  const removeAdult = (i) => {
-    if (editConfig.adults.length <= 1) { alert('Tiene que haber al menos un adulto.'); return; }
-    setEditConfig({ ...editConfig, adults: editConfig.adults.filter((_, idx) => idx !== i) });
-  };
-  const removeKid = (i) => {
-    if (editConfig.kids.length <= 1) { alert('Tiene que haber al menos un hijo.'); return; }
-    setEditConfig({ ...editConfig, kids: editConfig.kids.filter((_, idx) => idx !== i) });
-  };
+  const removeAdult = (i) => { if (editConfig.adults.length <= 1) { alert('Tiene que haber al menos un adulto.'); return; } setEditConfig({ ...editConfig, adults: editConfig.adults.filter((_, idx) => idx !== i) }); };
+  const removeKid = (i) => { if (editConfig.kids.length <= 1) { alert('Tiene que haber al menos un hijo.'); return; } setEditConfig({ ...editConfig, kids: editConfig.kids.filter((_, idx) => idx !== i) }); };
   const removeHelper = (i) => setEditConfig({ ...editConfig, helpers: editConfig.helpers.filter((_, idx) => idx !== i) });
-
-  const addAdult = () => {
-    if (editConfig.adults.length >= 2) return;
-    const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color));
-    const id = generateMemberId('adult', editConfig);
-    setEditConfig({ ...editConfig, adults: [...editConfig.adults, { id, name: '', color: colors[0]?.color || '#7BA05B' }] });
-  };
-  const addKid = () => {
-    if (editConfig.kids.length >= 6) return;
-    const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color));
-    const id = generateMemberId('kid', editConfig);
-    setEditConfig({ ...editConfig, kids: [...editConfig.kids, { id, name: '', color: colors[0]?.color || '#E87A93', young: false }] });
-  };
-  const addHelper = () => {
-    if (editConfig.helpers.length >= 4) return;
-    const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color));
-    const id = generateMemberId('helper', editConfig);
-    setEditConfig({ ...editConfig, helpers: [...editConfig.helpers, { id, name: '', color: colors[0]?.color || '#5B96B0' }] });
-  };
-
+  const addAdult = () => { if (editConfig.adults.length >= 2) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('adult', editConfig); setEditConfig({ ...editConfig, adults: [...editConfig.adults, { id, name: '', color: colors[0]?.color || '#7BA05B' }] }); };
+  const addKid = () => { if (editConfig.kids.length >= 6) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('kid', editConfig); setEditConfig({ ...editConfig, kids: [...editConfig.kids, { id, name: '', color: colors[0]?.color || '#E87A93', young: false }] }); };
+  const addHelper = () => { if (editConfig.helpers.length >= 4) return; const colors = Object.values(PALETTE).filter(p => !usedColors.includes(p.color)); const id = generateMemberId('helper', editConfig); setEditConfig({ ...editConfig, helpers: [...editConfig.helpers, { id, name: '', color: colors[0]?.color || '#5B96B0' }] }); };
   const setBonus = (v) => setEditConfig({ ...editConfig, bonusPct: v });
 
   const canSave = editConfig.adults.every(a => a.name.trim()) && editConfig.kids.every(k => k.name.trim()) && editConfig.helpers.every(h => h.name.trim());
-
-  const handleSave = () => {
-    if (!canSave) { alert('Completá todos los nombres antes de guardar.'); return; }
-    onUpdate(editConfig);
-    onClose();
-  };
+  const handleSave = () => { if (!canSave) { alert('Completá todos los nombres.'); return; } onUpdate(editConfig); onClose(); };
 
   const handlePinChange = () => {
     if (!verifyAdminPin(pinChange.current)) { setPinChange({ ...pinChange, message: { type: 'error', text: 'PIN actual incorrecto' } }); return; }
     if (!/^\d{4}$/.test(pinChange.newPin)) { setPinChange({ ...pinChange, message: { type: 'error', text: 'El PIN nuevo debe ser de 4 dígitos' } }); return; }
     if (pinChange.newPin !== pinChange.confirm) { setPinChange({ ...pinChange, message: { type: 'error', text: 'Los PINs no coinciden' } }); return; }
     updateAdminPin(pinChange.newPin);
-    setPinChange({ current: '', newPin: '', confirm: '', message: { type: 'success', text: 'PIN actualizado correctamente' } });
+    setStoredFamilyPin(familyCode, pinChange.newPin);
+    setPinChange({ current: '', newPin: '', confirm: '', message: { type: 'success', text: 'PIN actualizado' } });
+  };
+
+  const copyCode = async () => {
+    try { await navigator.clipboard.writeText(familyCode); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
   };
 
   return (
@@ -1420,60 +1471,53 @@ function SettingsModal({ config, onUpdate, onClose, onResetFamily }) {
         </div>
 
         <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <div className={`tab-pill ${tab === 'share' ? 'selected' : ''}`} onClick={() => setTab('share')}>Compartir</div>
           <div className={`tab-pill ${tab === 'family' ? 'selected' : ''}`} onClick={() => setTab('family')}>Miembros</div>
           <div className={`tab-pill ${tab === 'bonus' ? 'selected' : ''}`} onClick={() => setTab('bonus')}>Bonus</div>
-          <div className={`tab-pill ${tab === 'pin' ? 'selected' : ''}`} onClick={() => setTab('pin')}>Cambiar PIN</div>
+          <div className={`tab-pill ${tab === 'pin' ? 'selected' : ''}`} onClick={() => setTab('pin')}>PIN</div>
           <div className={`tab-pill ${tab === 'danger' ? 'selected' : ''}`} onClick={() => setTab('danger')} style={{ marginLeft: 'auto' }}>Avanzado</div>
         </div>
+
+        {tab === 'share' && (
+          <div>
+            <div className="editor-section" style={{ background: 'linear-gradient(135deg, #FFF8EE 0%, #FFE8D6 100%)', textAlign: 'center', padding: '24px' }}>
+              <Share2 size={28} color="#3D2E1F" style={{ margin: '0 auto 10px' }} />
+              <div className="serif" style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>Tu código de familia</div>
+              <p style={{ fontSize: '12px', color: '#8A7560', marginBottom: '14px' }}>Compartilo para que otros dispositivos vean los mismos datos.</p>
+              <div style={{ background: '#3D2E1F', color: '#FDFAF3', padding: '14px', borderRadius: '12px', marginBottom: '12px' }}>
+                <div className="serif" style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '0.05em' }}>{familyCode}</div>
+              </div>
+              <button className="btn-primary" onClick={copyCode} style={{ width: '100%', justifyContent: 'center' }}>
+                <Copy size={14} /> {copied ? '¡Copiado!' : 'Copiar código'}
+              </button>
+              <p style={{ fontSize: '11px', color: '#8A7560', fontStyle: 'italic', marginTop: '12px', lineHeight: 1.5 }}>
+                Cualquiera con este código puede ver y editar los datos. No lo compartas con desconocidos.
+              </p>
+            </div>
+          </div>
+        )}
 
         {tab === 'family' && (
           <div>
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <Users size={16} color="#3D2E1F" />
-                <div style={{ fontSize: '14px', fontWeight: 700 }}>Adultos ({editConfig.adults.length}/2)</div>
-              </div>
-              {editConfig.adults.map((a, i) => (
-                <EditorPersonRow key={a.id} person={a} usedColors={usedColors}
-                  onUpdate={(f, v) => updateAdult(i, f, v)} onRemove={() => removeAdult(i)}
-                  canRemove={editConfig.adults.length > 1} />
-              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Users size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Adultos ({editConfig.adults.length}/2)</div></div>
+              {editConfig.adults.map((a, i) => (<EditorPersonRow key={a.id} person={a} usedColors={usedColors} onUpdate={(f, v) => updateAdult(i, f, v)} onRemove={() => removeAdult(i)} canRemove={editConfig.adults.length > 1} />))}
               {editConfig.adults.length < 2 && <AddBtn onClick={addAdult} label="Agregar adulto" />}
             </div>
-
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <Baby size={16} color="#3D2E1F" />
-                <div style={{ fontSize: '14px', fontWeight: 700 }}>Hijos ({editConfig.kids.length}/6)</div>
-              </div>
-              {editConfig.kids.map((k, i) => (
-                <EditorPersonRow key={k.id} person={k} usedColors={usedColors}
-                  onUpdate={(f, v) => updateKid(i, f, v)} onRemove={() => removeKid(i)}
-                  canRemove={editConfig.kids.length > 1} showYoung />
-              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><Baby size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Hijos ({editConfig.kids.length}/6)</div></div>
+              {editConfig.kids.map((k, i) => (<EditorPersonRow key={k.id} person={k} usedColors={usedColors} onUpdate={(f, v) => updateKid(i, f, v)} onRemove={() => removeKid(i)} canRemove={editConfig.kids.length > 1} showYoung />))}
               {editConfig.kids.length < 6 && <AddBtn onClick={addKid} label="Agregar hijo" />}
             </div>
-
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <HeartHandshake size={16} color="#3D2E1F" />
-                <div style={{ fontSize: '14px', fontWeight: 700 }}>Ayuda ({editConfig.helpers.length}/4)</div>
-              </div>
-              {editConfig.helpers.map((h, i) => (
-                <EditorPersonRow key={h.id} person={h} usedColors={usedColors}
-                  onUpdate={(f, v) => updateHelper(i, f, v)} onRemove={() => removeHelper(i)}
-                  canRemove={true} />
-              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><HeartHandshake size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Ayuda ({editConfig.helpers.length}/4)</div></div>
+              {editConfig.helpers.map((h, i) => (<EditorPersonRow key={h.id} person={h} usedColors={usedColors} onUpdate={(f, v) => updateHelper(i, f, v)} onRemove={() => removeHelper(i)} canRemove={true} />))}
               {editConfig.helpers.length < 4 && <AddBtn onClick={addHelper} label="Agregar ayuda" />}
             </div>
-
-            <div style={{ background: '#FFF4E0', padding: '12px 14px', borderRadius: '10px', fontSize: '12px', color: '#6B4F18', marginTop: '12px' }}>
-              ⚠️ Si eliminás un miembro, se borran sus rutinas, tareas, eventos y trabajos asignados.
-            </div>
-
+            <div style={{ background: '#FFF4E0', padding: '12px 14px', borderRadius: '10px', fontSize: '12px', color: '#6B4F18', marginTop: '12px' }}>⚠️ Si eliminás un miembro, se borran sus rutinas, tareas y trabajos.</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
               <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-              <button className="btn-primary" onClick={handleSave} disabled={!canSave}>Guardar cambios</button>
+              <button className="btn-primary" onClick={handleSave} disabled={!canSave}>Guardar</button>
             </div>
           </div>
         )}
@@ -1481,15 +1525,12 @@ function SettingsModal({ config, onUpdate, onClose, onResetFamily }) {
         {tab === 'bonus' && (
           <div>
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                <Award size={16} color="#3D2E1F" />
-                <div style={{ fontSize: '14px', fontWeight: 700 }}>Bonus por completar el día</div>
-              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}><Award size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Bonus por completar el día</div></div>
               <BonusPicker value={editConfig.bonusPct ?? DEFAULT_BONUS_PCT} onChange={setBonus} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
               <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-              <button className="btn-primary" onClick={handleSave}>Guardar cambios</button>
+              <button className="btn-primary" onClick={handleSave}>Guardar</button>
             </div>
           </div>
         )}
@@ -1497,26 +1538,11 @@ function SettingsModal({ config, onUpdate, onClose, onResetFamily }) {
         {tab === 'pin' && (
           <div>
             <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                <Lock size={16} color="#3D2E1F" />
-                <div style={{ fontSize: '14px', fontWeight: 700 }}>Cambiar PIN</div>
-              </div>
-              <div className="field"><div className="label">PIN actual</div>
-                <input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.current} onChange={(e) => setPinChange({ ...pinChange, current: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" />
-              </div>
-              <div className="field"><div className="label">PIN nuevo (4 dígitos)</div>
-                <input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.newPin} onChange={(e) => setPinChange({ ...pinChange, newPin: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" />
-              </div>
-              <div className="field"><div className="label">Repetir PIN nuevo</div>
-                <input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.confirm} onChange={(e) => setPinChange({ ...pinChange, confirm: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" />
-              </div>
-              {pinChange.message && (
-                <div style={{ padding: '10px 12px', borderRadius: '10px', fontSize: '13px', marginBottom: '12px',
-                  background: pinChange.message.type === 'success' ? '#EDF4E2' : '#FCEBE6',
-                  color: pinChange.message.type === 'success' ? '#3D5C26' : '#C0392B' }}>
-                  {pinChange.message.text}
-                </div>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}><Lock size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Cambiar PIN</div></div>
+              <div className="field"><div className="label">PIN actual</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.current} onChange={(e) => setPinChange({ ...pinChange, current: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
+              <div className="field"><div className="label">PIN nuevo</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.newPin} onChange={(e) => setPinChange({ ...pinChange, newPin: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
+              <div className="field"><div className="label">Repetir</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.confirm} onChange={(e) => setPinChange({ ...pinChange, confirm: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
+              {pinChange.message && (<div style={{ padding: '10px 12px', borderRadius: '10px', fontSize: '13px', marginBottom: '12px', background: pinChange.message.type === 'success' ? '#EDF4E2' : '#FCEBE6', color: pinChange.message.type === 'success' ? '#3D5C26' : '#C0392B' }}>{pinChange.message.text}</div>)}
               <button className="btn-primary" onClick={handlePinChange}>Cambiar PIN</button>
             </div>
           </div>
@@ -1525,9 +1551,9 @@ function SettingsModal({ config, onUpdate, onClose, onResetFamily }) {
         {tab === 'danger' && (
           <div>
             <div style={{ background: '#FCEBE6', padding: '16px', borderRadius: '12px', marginBottom: '14px' }}>
-              <div style={{ fontWeight: 600, color: '#C0392B', marginBottom: '6px' }}>Reiniciar todo</div>
-              <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '12px' }}>Borra TODA la configuración: miembros, tareas, rutinas, puntos, dinero, historial. Vas a tener que configurar la familia de cero.</p>
-              <button className="btn-danger" onClick={onResetFamily}><Trash2 size={14} /> Reiniciar todo</button>
+              <div style={{ fontWeight: 600, color: '#C0392B', marginBottom: '6px' }}>Salir de esta familia</div>
+              <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '12px' }}>Te desconecta de la familia actual en este dispositivo. Los datos en la nube se conservan, podés volver con el código.</p>
+              <button className="btn-danger" onClick={onResetFamily}><Trash2 size={14} /> Salir de la familia</button>
             </div>
           </div>
         )}
@@ -1546,17 +1572,10 @@ function EditorPersonRow({ person, usedColors, onUpdate, onRemove, canRemove, sh
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: showYoung ? '10px' : 0 }}>
         {Object.values(PALETTE).map(p => {
           const isUsed = usedColors.includes(p.color) && person.color !== p.color;
-          return (
-            <button key={p.color} type="button" disabled={isUsed} onClick={() => onUpdate('color', p.color)} className={`ob-color-btn ${person.color === p.color ? 'selected' : ''}`} style={{ background: p.color, width: '28px', height: '28px' }} title={p.name} />
-          );
+          return (<button key={p.color} type="button" disabled={isUsed} onClick={() => onUpdate('color', p.color)} className={`ob-color-btn ${person.color === p.color ? 'selected' : ''}`} style={{ background: p.color, width: '28px', height: '28px' }} title={p.name} />);
         })}
       </div>
-      {showYoung && (
-        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-          <button type="button" className={`ob-toggle ${!person.young ? 'selected' : ''}`} onClick={() => onUpdate('young', false)}>Vista normal</button>
-          <button type="button" className={`ob-toggle ${person.young ? 'selected' : ''}`} onClick={() => onUpdate('young', true)}>Vista simple</button>
-        </div>
-      )}
+      {showYoung && (<div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}><button type="button" className={`ob-toggle ${!person.young ? 'selected' : ''}`} onClick={() => onUpdate('young', false)}>Vista normal</button><button type="button" className={`ob-toggle ${person.young ? 'selected' : ''}`} onClick={() => onUpdate('young', true)}>Vista simple</button></div>)}
     </div>
   );
 }
@@ -1587,12 +1606,7 @@ function PersonPicker({ family, value, onChange, label = 'Asignar a' }) {
     <div className="field">
       <div className="label">{label}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-        {Object.entries(family).map(([k, m]) => (
-          <div key={k} className={`person-chip ${value === k ? 'selected' : ''}`} style={{ '--clr': m.color }} onClick={() => onChange(k)}>
-            <div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '11px' }}>{m.initial}</div>
-            {m.name}
-          </div>
-        ))}
+        {Object.entries(family).map(([k, m]) => (<div key={k} className={`person-chip ${value === k ? 'selected' : ''}`} style={{ '--clr': m.color }} onClick={() => onChange(k)}><div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '11px' }}>{m.initial}</div>{m.name}</div>))}
       </div>
     </div>
   );
@@ -1600,30 +1614,13 @@ function PersonPicker({ family, value, onChange, label = 'Asignar a' }) {
 
 function IconPicker({ icons, value, onChange }) {
   return (
-    <div className="field">
-      <div className="label">Ícono</div>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-        {icons.map(ic => (
-          <button key={ic} type="button" className={`icon-picker-btn ${value === ic ? 'selected' : ''}`} onClick={() => onChange(ic)}>{ic}</button>
-        ))}
-      </div>
-    </div>
+    <div className="field"><div className="label">Ícono</div><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{icons.map(ic => (<button key={ic} type="button" className={`icon-picker-btn ${value === ic ? 'selected' : ''}`} onClick={() => onChange(ic)}>{ic}</button>))}</div></div>
   );
 }
 
 function PointsPicker({ value, onChange }) {
   return (
-    <div className="field">
-      <div className="label">Puntaje al completar</div>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-        {[1,2,3,4,5,6,7,8,9,10].map(n => (
-          <button key={n} type="button" onClick={() => onChange(n)} className={`points-picker-btn ${value === n ? 'selected' : ''}`}>{n}</button>
-        ))}
-      </div>
-      <div style={{ fontSize: '11px', color: '#8A7560', marginTop: '6px', fontStyle: 'italic' }}>
-        Más puntos para tareas más importantes. Por ejemplo: vestirse a tiempo = 5, ponerse crema = 1.
-      </div>
-    </div>
+    <div className="field"><div className="label">Puntaje al completar</div><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{[1,2,3,4,5,6,7,8,9,10].map(n => (<button key={n} type="button" onClick={() => onChange(n)} className={`points-picker-btn ${value === n ? 'selected' : ''}`}>{n}</button>))}</div><div style={{ fontSize: '11px', color: '#8A7560', marginTop: '6px', fontStyle: 'italic' }}>Más puntos para tareas más importantes.</div></div>
   );
 }
 
@@ -1633,101 +1630,30 @@ function RecurrencePicker({ recurrence, onChange }) {
   const [dayOfMonth, setDayOfMonth] = useState(recurrence?.dayOfMonth || 1);
   const [interval, setIntervalDays] = useState(recurrence?.interval || 2);
   const [startDate, setStartDate] = useState(recurrence?.startDate || todayKey());
-
-  useEffect(() => {
-    const r = { type, startDate };
-    if (type === 'weekly') r.weekdays = weekdays;
-    if (type === 'monthly') r.dayOfMonth = dayOfMonth;
-    if (type === 'custom') r.interval = interval;
-    onChange(r);
-  }, [type, weekdays, dayOfMonth, interval, startDate]);
-
+  useEffect(() => { const r = { type, startDate }; if (type === 'weekly') r.weekdays = weekdays; if (type === 'monthly') r.dayOfMonth = dayOfMonth; if (type === 'custom') r.interval = interval; onChange(r); }, [type, weekdays, dayOfMonth, interval, startDate]);
   const toggleWeekday = (d) => setWeekdays(weekdays.includes(d) ? weekdays.filter(x => x !== d) : [...weekdays, d].sort());
-
   const getNextOccurrences = () => {
     const tempItem = { recurrence: { type, startDate, weekdays, dayOfMonth, interval } };
-    const occurrences = [];
-    const start = parseKey(startDate);
+    const occurrences = []; const start = parseKey(startDate);
     const cursor = new Date(); cursor.setHours(0,0,0,0);
     const from = cursor < start ? start : cursor;
-    let check = new Date(from);
-    let safety = 0;
-    while (occurrences.length < 3 && safety < 365) {
-      if (appliesOn(tempItem, check)) {
-        occurrences.push(new Date(check));
-        if (type === 'once') break;
-      }
-      check.setDate(check.getDate() + 1);
-      safety++;
-    }
+    let check = new Date(from); let safety = 0;
+    while (occurrences.length < 3 && safety < 365) { if (appliesOn(tempItem, check)) { occurrences.push(new Date(check)); if (type === 'once') break; } check.setDate(check.getDate() + 1); safety++; }
     return occurrences;
   };
-
-  const formatPreview = (d) => {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-    if (dateKey(d) === dateKey(today)) return 'Hoy';
-    if (dateKey(d) === dateKey(tomorrow)) return 'Mañana';
-    return `${DAYS_ES[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
-  };
-
+  const formatPreview = (d) => { const today = new Date(); today.setHours(0,0,0,0); const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1); if (dateKey(d) === dateKey(today)) return 'Hoy'; if (dateKey(d) === dateKey(tomorrow)) return 'Mañana'; return `${DAYS_ES[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`; };
   const occurrences = getNextOccurrences();
-
   return (
     <div className="field">
       <div className="label">Periodicidad</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '12px' }}>
-        {[
-          { id: 'once', label: 'Única' },
-          { id: 'daily', label: 'Diaria' },
-          { id: 'weekly', label: 'Semanal' },
-          { id: 'monthly', label: 'Mensual' },
-          { id: 'custom', label: 'Cada X días' },
-        ].map(opt => (
-          <div key={opt.id} className={`toggle-pill ${type === opt.id ? 'selected' : ''}`} onClick={() => setType(opt.id)} style={{ fontSize: '12px', padding: '8px 8px' }}>{opt.label}</div>
-        ))}
+        {[{ id: 'once', label: 'Única' },{ id: 'daily', label: 'Diaria' },{ id: 'weekly', label: 'Semanal' },{ id: 'monthly', label: 'Mensual' },{ id: 'custom', label: 'Cada X días' }].map(opt => (<div key={opt.id} className={`toggle-pill ${type === opt.id ? 'selected' : ''}`} onClick={() => setType(opt.id)} style={{ fontSize: '12px', padding: '8px 8px' }}>{opt.label}</div>))}
       </div>
-
-      {type === 'weekly' && (
-        <div style={{ marginBottom: '14px' }}>
-          <div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>Días</div>
-          <div style={{ display: 'flex', gap: '4px', marginBottom: '8px', flexWrap: 'wrap' }}>
-            {[1,2,3,4,5,6,0].map(d => (
-              <div key={d} className={`day-pill ${weekdays.includes(d) ? 'selected' : ''}`} onClick={() => toggleWeekday(d)}>{DAYS_ES[d]}</div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {type === 'monthly' && (
-        <div style={{ marginBottom: '14px' }}>
-          <div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>Día del mes</div>
-          <input type="number" min="1" max="31" value={dayOfMonth} onChange={(e) => setDayOfMonth(Number(e.target.value))} className="input" style={{ width: '120px' }} />
-        </div>
-      )}
-
-      {type === 'custom' && (
-        <div style={{ marginBottom: '14px' }}>
-          <div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>Cada cuántos días</div>
-          <input type="number" min="2" max="90" value={interval} onChange={(e) => setIntervalDays(Number(e.target.value))} className="input" style={{ width: '120px' }} />
-        </div>
-      )}
-
-      <div style={{ marginTop: '12px', padding: '12px', background: '#FBF5E9', borderRadius: '12px' }}>
-        <div className="label" style={{ marginBottom: '6px' }}>{type === 'once' ? 'Fecha' : 'Empieza el'}</div>
-        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" style={{ background: 'white' }} />
-      </div>
-
-      {occurrences.length > 0 && (
-        <div style={{ marginTop: '10px', padding: '10px 12px', background: '#3D2E1F', borderRadius: '12px', color: '#FDFAF3' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, opacity: 0.7, marginBottom: '6px' }}>{type === 'once' ? 'APARECERÁ' : 'PRÓXIMAS'}</div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {occurrences.map((d, i) => (
-              <div key={i} className="serif" style={{ fontSize: '13px', fontWeight: 600, padding: '5px 10px', background: 'rgba(253,250,243,0.12)', borderRadius: '999px' }}>{formatPreview(d)}</div>
-            ))}
-          </div>
-        </div>
-      )}
+      {type === 'weekly' && (<div style={{ marginBottom: '14px' }}><div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>Días</div><div style={{ display: 'flex', gap: '4px', marginBottom: '8px', flexWrap: 'wrap' }}>{[1,2,3,4,5,6,0].map(d => (<div key={d} className={`day-pill ${weekdays.includes(d) ? 'selected' : ''}`} onClick={() => toggleWeekday(d)}>{DAYS_ES[d]}</div>))}</div></div>)}
+      {type === 'monthly' && (<div style={{ marginBottom: '14px' }}><div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>Día del mes</div><input type="number" min="1" max="31" value={dayOfMonth} onChange={(e) => setDayOfMonth(Number(e.target.value))} className="input" style={{ width: '120px' }} /></div>)}
+      {type === 'custom' && (<div style={{ marginBottom: '14px' }}><div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>Cada cuántos días</div><input type="number" min="2" max="90" value={interval} onChange={(e) => setIntervalDays(Number(e.target.value))} className="input" style={{ width: '120px' }} /></div>)}
+      <div style={{ marginTop: '12px', padding: '12px', background: '#FBF5E9', borderRadius: '12px' }}><div className="label" style={{ marginBottom: '6px' }}>{type === 'once' ? 'Fecha' : 'Empieza el'}</div><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" style={{ background: 'white' }} /></div>
+      {occurrences.length > 0 && (<div style={{ marginTop: '10px', padding: '10px 12px', background: '#3D2E1F', borderRadius: '12px', color: '#FDFAF3' }}><div style={{ fontSize: '11px', fontWeight: 600, opacity: 0.7, marginBottom: '6px' }}>{type === 'once' ? 'APARECERÁ' : 'PRÓXIMAS'}</div><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{occurrences.map((d, i) => (<div key={i} className="serif" style={{ fontSize: '13px', fontWeight: 600, padding: '5px 10px', background: 'rgba(253,250,243,0.12)', borderRadius: '999px' }}>{formatPreview(d)}</div>))}</div></div>)}
     </div>
   );
 }
@@ -1750,8 +1676,7 @@ function TaskModal({ data, family, onSave, onDelete, onClose }) {
 }
 
 function JobModal({ data, family, kidKeys, onSave, onDelete, onClose }) {
-  const kids = {};
-  kidKeys.forEach(k => { kids[k] = family[k]; });
+  const kids = {}; kidKeys.forEach(k => { kids[k] = family[k]; });
   const [title, setTitle] = useState(data?.title || '');
   const [icon, setIcon] = useState(data?.icon || '🌱');
   const [who, setWho] = useState(data?.who || kidKeys[0]);
@@ -1766,14 +1691,9 @@ function JobModal({ data, family, kidKeys, onSave, onDelete, onClose }) {
       <div className="field"><div className="label">Trabajo</div><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej: Cortar el pasto" autoFocus /></div>
       <IconPicker icons={['🌱','🚗','👗','🧸','🪴','🐠','🧹','🪟','🛋️','🍽️','📚','🧺','🚿','🌻']} value={icon} onChange={setIcon} />
       <PersonPicker family={kids} value={who} onChange={setWho} />
-      <div className="field"><div className="label">Recompensa</div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <div className={`toggle-pill ${rewardType === 'points' ? 'selected' : ''}`} onClick={() => setRewardType('points')}><Star size={14}/> Puntos</div>
-          <div className={`toggle-pill ${rewardType === 'money' ? 'selected' : ''}`} onClick={() => setRewardType('money')}><DollarSign size={14}/> Dinero</div>
-        </div>
-      </div>
-      <div className="field"><div className="label">{rewardType === 'money' ? 'Monto en pesos' : 'Cantidad de puntos'}</div><input className="input" type="number" value={rewardValue} onChange={(e) => setRewardValue(e.target.value)} /></div>
-      <div className="field"><div className="label">Para cuándo</div><input className="input" value={deadline} onChange={(e) => setDeadline(e.target.value)} placeholder="Hoy, Mañana, Sábado..." /></div>
+      <div className="field"><div className="label">Recompensa</div><div style={{ display: 'flex', gap: '8px' }}><div className={`toggle-pill ${rewardType === 'points' ? 'selected' : ''}`} onClick={() => setRewardType('points')}><Star size={14}/> Puntos</div><div className={`toggle-pill ${rewardType === 'money' ? 'selected' : ''}`} onClick={() => setRewardType('money')}><DollarSign size={14}/> Dinero</div></div></div>
+      <div className="field"><div className="label">{rewardType === 'money' ? 'Monto' : 'Puntos'}</div><input className="input" type="number" value={rewardValue} onChange={(e) => setRewardValue(e.target.value)} /></div>
+      <div className="field"><div className="label">Para cuándo</div><input className="input" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></div>
       <div className="field"><div className="label">Notas</div><textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ resize: 'vertical' }} /></div>
       <RecurrencePicker recurrence={recurrence} onChange={setRecurrence} />
     </ModalShell>
@@ -1790,7 +1710,7 @@ function EventModal({ data, family, onSave, onDelete, onClose }) {
   const handleSave = () => { if (title.trim()) onSave({ id: data?.id, title, time, duration, who, recurrence }); };
   return (
     <ModalShell title={data ? 'Editar evento' : 'Nuevo evento'} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
-      <div className="field"><div className="label">Título</div><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej: Yoga, Reunión, Cumple" autoFocus /></div>
+      <div className="field"><div className="label">Título</div><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus /></div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         <div className="field"><div className="label">Hora</div><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></div>
         <div className="field"><div className="label">Duración</div><input className="input" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="1h, 30m" /></div>
@@ -1807,14 +1727,10 @@ function RoutineModal({ data, member, memberData, onSave, onDelete, onClose }) {
   const [icon, setIcon] = useState(data?.icon || (isYoung ? '👕' : '🛏️'));
   const [points, setPoints] = useState(data?.points || 1);
   const [recurrence, setRecurrence] = useState(data?.recurrence || { type: 'daily', startDate: todayKey() });
-  const handleSave = () => {
-    if (!text.trim()) return;
-    if (isYoung) onSave({ id: data?.id, label: text, icon, points, recurrence });
-    else onSave({ id: data?.id, text, icon, points, recurrence });
-  };
+  const handleSave = () => { if (!text.trim()) return; if (isYoung) onSave({ id: data?.id, label: text, icon, points, recurrence }); else onSave({ id: data?.id, text, icon, points, recurrence }); };
   return (
     <ModalShell title={`${data ? 'Editar' : 'Nuevo'} paso · ${memberData?.name}`} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
-      <div className="field"><div className="label">{isYoung ? 'Etiqueta' : 'Paso'}</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder={isYoung ? 'Vestirse' : 'Tender la cama'} autoFocus /></div>
+      <div className="field"><div className="label">{isYoung ? 'Etiqueta' : 'Paso'}</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} autoFocus /></div>
       <IconPicker icons={['👕','🥣','🪥','💆','🧴','🧥','🛏️','🥐','🎒','🎸','👟','📚','🚿','🧦','🍎','🎨','📝']} value={icon} onChange={setIcon} />
       <PointsPicker value={points} onChange={setPoints} />
       <RecurrencePicker recurrence={recurrence} onChange={setRecurrence} />
@@ -1828,7 +1744,7 @@ function ListModal({ data, onSave, onDelete, onClose }) {
   const handleSave = () => { if (name.trim()) onSave({ id: data?.id, name, icon }); };
   return (
     <ModalShell title={data ? 'Editar lista' : 'Nueva lista'} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
-      <div className="field"><div className="label">Nombre</div><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Compras, viaje, cumple..." autoFocus /></div>
+      <div className="field"><div className="label">Nombre</div><input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></div>
       <IconPicker icons={['🛒','🏖️','🎂','📝','🧳','🎁','🍳','🏠','💊','📚','🎉','✈️','🏥']} value={icon} onChange={setIcon} />
     </ModalShell>
   );
@@ -1839,7 +1755,7 @@ function ListItemModal({ data, onSave, onClose }) {
   const handleSave = () => { if (text.trim()) onSave({ id: data?.id, text }); };
   return (
     <ModalShell title="Agregar item" onClose={onClose} onSave={handleSave} hasId={!!data}>
-      <div className="field"><div className="label">Item</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ej: Tomates" autoFocus onKeyDown={(e) => e.key === 'Enter' && handleSave()} /></div>
+      <div className="field"><div className="label">Item</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleSave()} /></div>
     </ModalShell>
   );
 }

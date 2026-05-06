@@ -7,7 +7,6 @@ export const DAYS_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 
 export const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 export const MONTHS_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
-// Paleta de colores disponibles para asignar a miembros
 export const PALETTE = {
   terracota:  { color: '#E8804F', name: 'Terracota' },
   oliva:      { color: '#7BA05B', name: 'Oliva' },
@@ -20,6 +19,8 @@ export const PALETTE = {
   arena:      { color: '#C49B6C', name: 'Arena' },
   carmesi:    { color: '#C0392B', name: 'Carmesí' },
 };
+
+export const DEFAULT_BONUS_PCT = 30;
 
 // ============================================================================
 // FECHAS Y RECURRENCIA
@@ -119,7 +120,7 @@ export const setInitialAdminPin = (pin) => {
 };
 
 // ============================================================================
-// ESTRUCTURA INICIAL VACÍA - cada familia configura la suya
+// ESTRUCTURA INICIAL VACÍA
 // ============================================================================
 
 export const INITIAL_TASKS = [];
@@ -128,17 +129,12 @@ export const INITIAL_ROUTINES = {};
 export const INITIAL_JOBS = [];
 export const INITIAL_EVENTS = [];
 export const INITIAL_LISTS = [];
-
-// FAMILY ya no se hardcodea — se construye desde el onboarding del usuario.
-// Se guarda en localStorage bajo la clave 'family'.
 export const FAMILY = {};
 
-// Helper para construir la estructura FAMILY desde los datos del onboarding
 export const buildFamilyFromOnboarding = (data) => {
   const family = {};
-  data.adults.forEach((adult, i) => {
-    const key = adult.id;
-    family[key] = {
+  data.adults.forEach((adult) => {
+    family[adult.id] = {
       name: adult.name,
       initial: adult.name.charAt(0).toUpperCase(),
       color: adult.color,
@@ -147,8 +143,7 @@ export const buildFamilyFromOnboarding = (data) => {
     };
   });
   data.kids.forEach((kid) => {
-    const key = kid.id;
-    family[key] = {
+    family[kid.id] = {
       name: kid.name,
       initial: kid.name.charAt(0).toUpperCase(),
       color: kid.color,
@@ -158,8 +153,7 @@ export const buildFamilyFromOnboarding = (data) => {
     };
   });
   data.helpers.forEach((helper) => {
-    const key = helper.id;
-    family[key] = {
+    family[helper.id] = {
       name: helper.name,
       initial: helper.name.charAt(0).toUpperCase(),
       color: helper.color,
@@ -236,4 +230,21 @@ export const formatTime = (d) => {
 
 export const formatDate = (d) => {
   return `${DAYS_FULL[d.getDay()]}, ${d.getDate()} de ${MONTHS[d.getMonth()]}`;
+};
+
+// ============================================================================
+// HELPERS PARA EDITAR FAMILIA
+// ============================================================================
+
+export const generateMemberId = (type, existingConfig) => {
+  const list = type === 'adult' ? existingConfig.adults
+              : type === 'kid'   ? existingConfig.kids
+              : existingConfig.helpers;
+  let i = 1;
+  while (list.some(m => m.id === `${type}${i}`)) i++;
+  return `${type}${i}`;
+};
+
+export const getUsedColors = (config) => {
+  return [...config.adults, ...config.kids, ...config.helpers].map(p => p.color);
 };

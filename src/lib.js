@@ -41,6 +41,133 @@ export const getPetEmoji = (typeId) => PET_TYPES.find(t => t.id === typeId)?.emo
 export const getPetTypeLabel = (typeId) => PET_TYPES.find(t => t.id === typeId)?.label || 'Mascota';
 
 // ============================================================================
+// MOMENTOS DEL DÍA
+// ============================================================================
+
+export const TIME_OF_DAY = [
+  { id: 'morning',   label: 'Mañana', emoji: '🌅', hours: [5, 12] },
+  { id: 'afternoon', label: 'Tarde',  emoji: '☀️', hours: [12, 19] },
+  { id: 'evening',   label: 'Noche',  emoji: '🌙', hours: [19, 29] }, // 29 = 5am del día siguiente
+];
+
+export const getTimeOfDayInfo = (id) => TIME_OF_DAY.find(t => t.id === id) || { id: 'any', label: 'Cualquiera', emoji: '⏱️' };
+
+export const getCurrentTimeOfDay = () => {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return 'morning';
+  if (h >= 12 && h < 19) return 'afternoon';
+  return 'evening';
+};
+
+// ============================================================================
+// CATÁLOGO DE PLATOS (cocina argentina/latinoamericana familiar)
+// ============================================================================
+
+// Tags posibles: red_meat, white_meat, fish, pasta, vegetarian, fried, soup, salad, light, kids_friendly
+export const MEAL_CATALOG = [
+  // Carnes rojas
+  { id: 'milanesa_carne', name: 'Milanesa de carne', category: 'Carnes', tags: ['red_meat','fried','kids_friendly'], emoji: '🥩' },
+  { id: 'asado',          name: 'Asado',             category: 'Carnes', tags: ['red_meat'], emoji: '🥩' },
+  { id: 'bife_pure',      name: 'Bife con puré',     category: 'Carnes', tags: ['red_meat','kids_friendly'], emoji: '🥩' },
+  { id: 'pastel_papa',    name: 'Pastel de papa',    category: 'Carnes', tags: ['red_meat','kids_friendly'], emoji: '🥧' },
+  { id: 'albondigas',     name: 'Albóndigas',        category: 'Carnes', tags: ['red_meat','kids_friendly'], emoji: '🍝' },
+  { id: 'guiso_lentejas', name: 'Guiso de lentejas', category: 'Guisos', tags: ['red_meat','soup'], emoji: '🥘' },
+  { id: 'estofado',       name: 'Estofado',          category: 'Guisos', tags: ['red_meat','soup'], emoji: '🥘' },
+  { id: 'matambre_napo',  name: 'Matambre a la napolitana', category: 'Carnes', tags: ['red_meat'], emoji: '🥩' },
+  { id: 'empanadas_carne',name: 'Empanadas de carne',category: 'Empanadas', tags: ['red_meat','fried'], emoji: '🥟' },
+  { id: 'hamburguesa',    name: 'Hamburguesas caseras', category: 'Carnes', tags: ['red_meat','kids_friendly'], emoji: '🍔' },
+
+  // Pollo / cerdo
+  { id: 'milanesa_pollo', name: 'Milanesa de pollo', category: 'Pollo', tags: ['white_meat','fried','kids_friendly'], emoji: '🍗' },
+  { id: 'pollo_papas',    name: 'Pollo al horno con papas', category: 'Pollo', tags: ['white_meat','kids_friendly'], emoji: '🍗' },
+  { id: 'pollo_arroz',    name: 'Pollo con arroz',   category: 'Pollo', tags: ['white_meat','kids_friendly'], emoji: '🍗' },
+  { id: 'suprema',        name: 'Suprema de pollo',  category: 'Pollo', tags: ['white_meat','fried','kids_friendly'], emoji: '🍗' },
+  { id: 'pollo_limon',    name: 'Pollo al limón',    category: 'Pollo', tags: ['white_meat','light'], emoji: '🍗' },
+  { id: 'pollo_curry',    name: 'Pollo al curry',    category: 'Pollo', tags: ['white_meat'], emoji: '🍗' },
+  { id: 'cerdo_pure',     name: 'Bondiola de cerdo', category: 'Cerdo', tags: ['white_meat'], emoji: '🥩' },
+  { id: 'empanadas_pollo',name: 'Empanadas de pollo',category: 'Empanadas', tags: ['white_meat','fried'], emoji: '🥟' },
+
+  // Pescados
+  { id: 'merluza_pure',   name: 'Merluza con puré',  category: 'Pescados', tags: ['fish','light','kids_friendly'], emoji: '🐟' },
+  { id: 'salmon_horno',   name: 'Salmón al horno',   category: 'Pescados', tags: ['fish','light'], emoji: '🐟' },
+  { id: 'atun_pasta',     name: 'Pasta con atún',    category: 'Pescados', tags: ['fish','pasta'], emoji: '🍝' },
+  { id: 'rabas',          name: 'Rabas',             category: 'Pescados', tags: ['fish','fried'], emoji: '🦑' },
+  { id: 'milanesa_pesca', name: 'Milanesa de pescado', category: 'Pescados', tags: ['fish','fried','kids_friendly'], emoji: '🐟' },
+
+  // Pastas
+  { id: 'tallarines',     name: 'Tallarines con tuco',category: 'Pastas', tags: ['pasta','kids_friendly'], emoji: '🍝' },
+  { id: 'fideos_filetto', name: 'Fideos al filetto', category: 'Pastas', tags: ['pasta','vegetarian','kids_friendly'], emoji: '🍝' },
+  { id: 'sorrentinos',    name: 'Sorrentinos',       category: 'Pastas', tags: ['pasta','kids_friendly'], emoji: '🥟' },
+  { id: 'ravioles',       name: 'Ravioles',          category: 'Pastas', tags: ['pasta','kids_friendly'], emoji: '🥟' },
+  { id: 'noquis',         name: 'Ñoquis',            category: 'Pastas', tags: ['pasta','vegetarian','kids_friendly'], emoji: '🥔' },
+  { id: 'lasagna',        name: 'Lasaña',            category: 'Pastas', tags: ['pasta','red_meat'], emoji: '🍝' },
+  { id: 'canelones',      name: 'Canelones',         category: 'Pastas', tags: ['pasta'], emoji: '🍝' },
+  { id: 'fideos_manteca', name: 'Fideos con manteca',category: 'Pastas', tags: ['pasta','vegetarian','kids_friendly'], emoji: '🍝' },
+  { id: 'spaghetti_carbo',name: 'Spaghetti carbonara',category: 'Pastas', tags: ['pasta','white_meat'], emoji: '🍝' },
+
+  // Vegetarianos / Verduras
+  { id: 'tarta_verdura',  name: 'Tarta de verdura',  category: 'Vegetarianos', tags: ['vegetarian'], emoji: '🥧' },
+  { id: 'tarta_choclo',   name: 'Tarta de choclo',   category: 'Vegetarianos', tags: ['vegetarian','kids_friendly'], emoji: '🥧' },
+  { id: 'pizza_casera',   name: 'Pizza casera',      category: 'Vegetarianos', tags: ['vegetarian','kids_friendly'], emoji: '🍕' },
+  { id: 'tortilla_papa',  name: 'Tortilla de papa',  category: 'Vegetarianos', tags: ['vegetarian','kids_friendly'], emoji: '🍳' },
+  { id: 'revuelto_gramaj',name: 'Revuelto Gramajo',  category: 'Vegetarianos', tags: ['white_meat'], emoji: '🍳' },
+  { id: 'sopa_verduras',  name: 'Sopa de verduras',  category: 'Sopas', tags: ['vegetarian','soup','light'], emoji: '🍲' },
+  { id: 'crema_calabaza', name: 'Crema de calabaza', category: 'Sopas', tags: ['vegetarian','soup','light'], emoji: '🥣' },
+  { id: 'berenjena_napo', name: 'Berenjena a la napolitana', category: 'Vegetarianos', tags: ['vegetarian'], emoji: '🍆' },
+  { id: 'zapallitos_rell',name: 'Zapallitos rellenos',category: 'Vegetarianos', tags: ['vegetarian'], emoji: '🥒' },
+  { id: 'budin_zucchini', name: 'Budín de zucchini', category: 'Vegetarianos', tags: ['vegetarian','light'], emoji: '🥒' },
+  { id: 'risotto',        name: 'Risotto',           category: 'Vegetarianos', tags: ['vegetarian'], emoji: '🍚' },
+  { id: 'arroz_integral', name: 'Arroz integral con verduras', category: 'Vegetarianos', tags: ['vegetarian','light'], emoji: '🍚' },
+  { id: 'wok_verduras',   name: 'Wok de verduras',   category: 'Vegetarianos', tags: ['vegetarian','light'], emoji: '🥢' },
+
+  // Ensaladas / Light
+  { id: 'ensalada_completa', name: 'Ensalada completa', category: 'Ensaladas', tags: ['salad','light','vegetarian'], emoji: '🥗' },
+  { id: 'ensalada_caesar',name: 'Ensalada César',    category: 'Ensaladas', tags: ['salad','light','white_meat'], emoji: '🥗' },
+  { id: 'ensalada_pollo', name: 'Ensalada con pollo',category: 'Ensaladas', tags: ['salad','light','white_meat'], emoji: '🥗' },
+  { id: 'wrap_pollo',     name: 'Wrap de pollo',     category: 'Otros', tags: ['white_meat','light'], emoji: '🌯' },
+
+  // Comidas argentinas tradicionales
+  { id: 'locro',          name: 'Locro',             category: 'Tradicionales', tags: ['red_meat','soup'], emoji: '🍲' },
+  { id: 'humita',         name: 'Humita en chala',   category: 'Tradicionales', tags: ['vegetarian'], emoji: '🌽' },
+  { id: 'choripan',       name: 'Choripán',          category: 'Tradicionales', tags: ['red_meat','kids_friendly'], emoji: '🌭' },
+  { id: 'puchero',        name: 'Puchero',           category: 'Tradicionales', tags: ['red_meat','soup'], emoji: '🍲' },
+
+  // Rápidas / Niños
+  { id: 'pancho',         name: 'Panchos',           category: 'Rápidas', tags: ['red_meat','kids_friendly','fried'], emoji: '🌭' },
+  { id: 'sandwich_milan', name: 'Sándwich de milanesa', category: 'Rápidas', tags: ['red_meat','kids_friendly'], emoji: '🥪' },
+  { id: 'tostones',       name: 'Tostones / sándwiches caliente', category: 'Rápidas', tags: ['vegetarian','kids_friendly'], emoji: '🥪' },
+  { id: 'pizza_delivery', name: 'Pizza (delivery)',  category: 'Rápidas', tags: ['vegetarian','kids_friendly'], emoji: '🍕' },
+  { id: 'empanadas_var',  name: 'Empanadas variadas',category: 'Empanadas', tags: ['fried'], emoji: '🥟' },
+];
+
+// Categorías de balance (los grupos que mostramos en la donut)
+export const MEAL_BALANCE_CATEGORIES = [
+  { id: 'red_meat',   label: 'Carnes rojas',   color: '#C0392B', suggested: 3 }, // veces por semana sugeridas
+  { id: 'white_meat', label: 'Pollo / cerdo',  color: '#E8804F', suggested: 3 },
+  { id: 'fish',       label: 'Pescados',       color: '#5B96B0', suggested: 2 },
+  { id: 'pasta',      label: 'Pastas',         color: '#F5B645', suggested: 2 },
+  { id: 'vegetarian', label: 'Vegetarianos',   color: '#7BA05B', suggested: 3 },
+  { id: 'fried',      label: 'Frituras',       color: '#9B7FB8', suggested: 2, isLimit: true }, // máximo sugerido (no objetivo)
+];
+
+// Dado un meal (con tags), devuelve las categorías de balance a las que pertenece (puede ser >1)
+export const mealBalanceCategories = (meal) => {
+  if (!meal || !meal.tags) return [];
+  const cats = [];
+  if (meal.tags.includes('red_meat'))   cats.push('red_meat');
+  if (meal.tags.includes('white_meat')) cats.push('white_meat');
+  if (meal.tags.includes('fish'))       cats.push('fish');
+  if (meal.tags.includes('pasta'))      cats.push('pasta');
+  if (meal.tags.includes('vegetarian') && !meal.tags.includes('red_meat') && !meal.tags.includes('white_meat') && !meal.tags.includes('fish')) {
+    cats.push('vegetarian');
+  }
+  if (meal.tags.includes('fried'))      cats.push('fried');
+  return cats;
+};
+
+export const getMealById = (id) => MEAL_CATALOG.find(m => m.id === id);
+
+// ============================================================================
 // TEMPLATES DE RUTINAS PREDEFINIDAS
 // ============================================================================
 
@@ -51,7 +178,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Mañana de los chiquitos',
       description: 'Para empezar el día con todo listo',
       icon: '🌅',
-      points: 1,
+      timeOfDay: 'morning',
       steps: [
         { label: 'Levantarme', icon: '🛏️', points: 1 },
         { label: 'Hacer pis', icon: '🚽', points: 1 },
@@ -65,7 +192,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Antes de dormir',
       description: 'Rutina de la noche, pasos simples',
       icon: '🌙',
-      points: 1,
+      timeOfDay: 'evening',
       steps: [
         { label: 'Bañarme', icon: '🚿', points: 1 },
         { label: 'Pijama', icon: '👕', points: 1 },
@@ -78,7 +205,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'En la mesa',
       description: 'Cosas que hacemos al comer',
       icon: '🍽️',
-      points: 1,
+      timeOfDay: 'any',
       steps: [
         { label: 'Lavarme las manos', icon: '🧼', points: 1 },
         { label: 'Sentarme bien', icon: '🪑', points: 1 },
@@ -93,7 +220,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Mañana de cole',
       description: 'Todo lo que hace falta antes de salir',
       icon: '🎒',
-      points: 1,
+      timeOfDay: 'morning',
       steps: [
         { text: 'Levantarme con la primera alarma', icon: '⏰', points: 2 },
         { text: 'Hacer la cama', icon: '🛏️', points: 1 },
@@ -108,7 +235,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Tarea y estudio',
       description: 'Después del cole',
       icon: '📚',
-      points: 2,
+      timeOfDay: 'afternoon',
       steps: [
         { text: 'Sacar la merienda y comer', icon: '🍎', points: 1 },
         { text: 'Revisar agenda escolar', icon: '📓', points: 1 },
@@ -121,7 +248,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Rutina de noche',
       description: 'Para llegar bien a la cama',
       icon: '🌙',
-      points: 1,
+      timeOfDay: 'evening',
       steps: [
         { text: 'Bañarme', icon: '🚿', points: 2 },
         { text: 'Ponerme el pijama', icon: '👕', points: 1 },
@@ -135,7 +262,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Ayuda en casa',
       description: 'Tareas chicas para colaborar',
       icon: '🏠',
-      points: 2,
+      timeOfDay: 'any',
       steps: [
         { text: 'Ordenar mi cuarto', icon: '🧸', points: 2 },
         { text: 'Poner la mesa', icon: '🍽️', points: 1 },
@@ -148,7 +275,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Hábitos saludables',
       description: 'Pequeñas cosas que suman a largo plazo',
       icon: '💪',
-      points: 1,
+      timeOfDay: 'any',
       steps: [
         { text: 'Tomar al menos 4 vasos de agua', icon: '💧', points: 2 },
         { text: 'Comer una fruta', icon: '🍎', points: 1 },
@@ -163,7 +290,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Mañana autogestionada',
       description: 'Empezar el día sin que nadie te avise',
       icon: '🌅',
-      points: 2,
+      timeOfDay: 'morning',
       steps: [
         { text: 'Despertarme con mi propia alarma', icon: '⏰', points: 3 },
         { text: 'Hacer la cama', icon: '🛏️', points: 1 },
@@ -178,7 +305,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Estudio y responsabilidades',
       description: 'Para la tarde, después del colegio',
       icon: '📚',
-      points: 3,
+      timeOfDay: 'afternoon',
       steps: [
         { text: 'Revisar tareas y exámenes próximos', icon: '📅', points: 2 },
         { text: 'Hacer la tarea con concentración', icon: '✏️', points: 4 },
@@ -191,7 +318,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Cierre del día',
       description: 'Para descansar bien',
       icon: '🌙',
-      points: 2,
+      timeOfDay: 'evening',
       steps: [
         { text: 'Dejar el celular a cargar fuera del cuarto', icon: '📱', points: 3 },
         { text: 'Ducha o higiene de noche', icon: '🚿', points: 2 },
@@ -204,7 +331,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Autonomía en casa',
       description: 'Tareas para colaborar como adolescente',
       icon: '🏠',
-      points: 3,
+      timeOfDay: 'any',
       steps: [
         { text: 'Mantener mi cuarto ordenado', icon: '🛏️', points: 2 },
         { text: 'Lavar mi ropa (o ayudar)', icon: '🧺', points: 3 },
@@ -217,7 +344,7 @@ export const ROUTINE_TEMPLATES = {
       name: 'Bienestar y autocuidado',
       description: 'Hábitos que te van a servir toda la vida',
       icon: '🌱',
-      points: 2,
+      timeOfDay: 'any',
       steps: [
         { text: '30 min de actividad física', icon: '⚽', points: 3 },
         { text: 'Tiempo sin pantallas (1 hora)', icon: '📵', points: 3 },
@@ -348,6 +475,7 @@ export const packStateForSync = (state) => ({
   bigJobs: state.bigJobs || [],
   events: state.events || [],
   lists: state.lists || [],
+  meals: state.meals || {},
   points: state.points || {},
   money: state.money || {},
   history: state.history || [],
@@ -363,6 +491,7 @@ export const normalizeConfig = (config) => {
   const c = config || {};
   return {
     bonusPct: DEFAULT_BONUS_PCT,
+    showMealBalance: true,
     ...c,
     adults:  Array.isArray(c.adults)  ? c.adults  : [],
     kids:    Array.isArray(c.kids)    ? c.kids    : [],
@@ -398,6 +527,7 @@ export const normalizeFamilyData = (raw) => {
     routines:     normalizeRoutines(data.routines),
     points:       (data.points && typeof data.points === 'object') ? data.points : {},
     money:        (data.money  && typeof data.money  === 'object') ? data.money  : {},
+    meals:        (data.meals  && typeof data.meals  === 'object') ? data.meals  : {},
     pinHash:      data.pinHash || null,
     updatedAt:    data.updatedAt || null,
   };

@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award, Cloud, CloudOff, Copy, Share2, KeyRound, Wifi, PawPrint, Wand2, BookTemplate } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, ChevronLeft, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award, Cloud, CloudOff, Copy, Share2, KeyRound, Wifi, PawPrint, Wand2, UtensilsCrossed, PieChart, Sun, Moon, Sunrise } from 'lucide-react';
 import {
   DAYS_ES, DAYS_FULL, MONTHS, MONTHS_SHORT, PALETTE, DEFAULT_BONUS_PCT,
   PET_TYPES, getPetEmoji, getPetTypeLabel, ROUTINE_TEMPLATES,
+  TIME_OF_DAY, getTimeOfDayInfo, getCurrentTimeOfDay,
+  MEAL_CATALOG, MEAL_BALANCE_CATEGORIES, mealBalanceCategories, getMealById,
   dateKey, parseKey, daysBetween, appliesOn, recurrenceLabel, todayKey,
   loadState, saveState, verifyAdminPin, updateAdminPin, setInitialAdminPin,
   buildFamilyFromOnboarding, generateMemberId, getUsedColors,
@@ -14,25 +16,27 @@ import {
 import { generateFamilyCode, subscribeFamilyData, saveFamilyData, checkFamilyCodeExists } from './firebase.js';
 
 // ============================================================================
-// HELPERS para rutinas (compartidas o individuales)
+// HELPERS para estructuras compartidas (rutinas y tareas)
 // ============================================================================
-// Una rutina puede tener:
-//   - who: string (rutina individual, asignada a 1 miembro) -- LEGACY
-//   - whoIds: array de strings (rutina compartida entre N miembros) -- NUEVO
-// Estas funciones unifican el acceso para que la UI no tenga que distinguir.
+// Una rutina/tarea puede tener:
+//   - who: string  (formato viejo, individual)
+//   - whoIds: array (formato nuevo, individual o compartida si len > 1)
 
-const routineAppliesTo = (routine, memberId) => {
-  if (Array.isArray(routine.whoIds)) return routine.whoIds.includes(memberId);
-  return routine.who === memberId;
+const itemAppliesTo = (item, memberId) => {
+  if (Array.isArray(item.whoIds)) return item.whoIds.includes(memberId);
+  return item.who === memberId;
 };
 
-const routineMembers = (routine) => {
-  if (Array.isArray(routine.whoIds)) return routine.whoIds;
-  if (routine.who) return [routine.who];
+const itemMembers = (item) => {
+  if (Array.isArray(item.whoIds)) return item.whoIds;
+  if (item.who) return [item.who];
   return [];
 };
 
-const isShared = (routine) => Array.isArray(routine.whoIds) && routine.whoIds.length > 1;
+const isSharedItem = (item) => Array.isArray(item.whoIds) && item.whoIds.length > 1;
+
+// Para rutinas: el timeOfDay default es 'any'
+const getRoutineTimeOfDay = (r) => r.timeOfDay || 'any';
 
 export default function App() {
   const [familyCode, setFamilyCode] = useState(() => loadState(FAMILY_CODE_KEY, null));
@@ -199,7 +203,7 @@ function LoadingScreen({ status, familyCode }) {
 }
 
 // ============================================================================
-// ONBOARDING (con paso de mascotas integrado)
+// ONBOARDING
 // ============================================================================
 
 function OnboardingFlow({ familyCode, onComplete, onResetFamily }) {
@@ -578,12 +582,14 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const normalKidKeys = familyConfig.kids.filter(k => !k.young).map(k => k.id);
   const petKeys = familyConfig.pets.map(p => p.id);
   const bonusPct = familyConfig.bonusPct ?? DEFAULT_BONUS_PCT;
+  const showMealBalance = familyConfig.showMealBalance !== false;
 
   const tasks = safeData.tasks;
   const routines = safeData.routines;
   const bigJobs = safeData.bigJobs;
   const events = safeData.events;
   const lists = safeData.lists;
+  const meals = safeData.meals;
   const history = safeData.history;
   const jobInstances = safeData.jobInstances;
   const points = Object.keys(safeData.points).length > 0 ? safeData.points : (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
@@ -592,7 +598,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const saveToCloud = (updates) => {
     const newData = {
       config: familyConfig,
-      tasks, routines, bigJobs, events, lists, points, money, history, jobInstances,
+      tasks, routines, bigJobs, events, lists, meals, points, money, history, jobInstances,
       ...updates,
     };
     saveFamilyData(familyCode, newData);
@@ -603,6 +609,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const setBigJobs = (v) => saveToCloud({ bigJobs: typeof v === 'function' ? v(bigJobs) : v });
   const setEvents = (v) => saveToCloud({ events: typeof v === 'function' ? v(events) : v });
   const setLists = (v) => saveToCloud({ lists: typeof v === 'function' ? v(lists) : v });
+  const setMeals = (v) => saveToCloud({ meals: typeof v === 'function' ? v(meals) : v });
   const setPoints = (v) => saveToCloud({ points: typeof v === 'function' ? v(points) : v });
   const setMoney = (v) => saveToCloud({ money: typeof v === 'function' ? v(money) : v });
   const setHistory = (v) => saveToCloud({ history: typeof v === 'function' ? v(history) : v });
@@ -645,18 +652,26 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const tk = todayKey();
   const today = new Date(); today.setHours(0,0,0,0);
 
-  // Tareas: pueden estar asignadas a humanos o mascotas
-  const todaysTasks = tasks.filter(t => family[t.who] && appliesOn(t, today)).map(t => ({
-    ...t, done: history.some(h => h.kind === 'task' && h.templateId === t.id && h.date === tk),
-  }));
+  // Tareas: pueden ser individuales o compartidas (whoIds)
+  // Para "todaysTasks" devolvemos cada tarea expandida por miembro al que aplica
+  const todaysTasksRaw = tasks.filter(t => appliesOn(t, today));
+  const expandTaskForMembers = (t) => {
+    const members = itemMembers(t);
+    if (members.length === 0) return [];
+    return members.filter(m => family[m]).map(memberId => ({
+      ...t,
+      _displayWho: memberId,  // a quién se le muestra
+      done: history.some(h => h.kind === 'task' && h.templateId === t.id && h.date === tk && h.who === memberId),
+    }));
+  };
+  const todaysTasksExpanded = todaysTasksRaw.flatMap(expandTaskForMembers);
+
   const todaysEvents = events.filter(e => family[e.who] && appliesOn(e, today));
 
-  // Rutinas: el "kid" recibe TODAS las rutinas que le aplican (individuales + compartidas)
-  // Se busca tanto en routines[kid] (formato viejo: rutinas individuales)
-  // como en routines.shared (formato nuevo: rutinas compartidas con whoIds)
+  // Rutinas: routines[member] (individual) + routines.shared (compartida)
   const todaysRoutinesFor = (kid) => {
     const direct = (routines[kid] || []);
-    const shared = (routines.shared || []).filter(r => routineAppliesTo(r, kid));
+    const shared = (routines.shared || []).filter(r => itemAppliesTo(r, kid));
     const all = [...direct, ...shared].filter(r => appliesOn(r, today));
     return all.map(r => ({
       ...r,
@@ -673,6 +688,8 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     return { ...j, instance: inst, status: inst?.status || 'pending' };
   });
 
+  // Filtrado por vista. Para tareas, filtramos por _displayWho
+  const filterTasksByView = (items) => viewFilter === 'all' ? items : items.filter(t => t._displayWho === viewFilter);
   const filterByView = (items, getWho) => viewFilter === 'all' ? items : items.filter(i => getWho(i) === viewFilter);
 
   const triggerConfetti = (x, y, color, intensity = 1) => {
@@ -694,14 +711,17 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     setTimeout(() => setBigCelebration(null), 2800);
   };
 
-  const toggleTask = (taskId, e) => {
+  // Toggle de tarea: para una tarea compartida, cada persona tiene su propio "done"
+  const toggleTask = (taskId, displayWho, e) => {
     const task = tasks.find(t => t.id === taskId);
-    const existing = history.find(h => h.kind === 'task' && h.templateId === taskId && h.date === tk);
-    if (existing) saveToCloud({ history: history.filter(h => h.id !== existing.id) });
-    else {
+    if (!task) return;
+    const existing = history.find(h => h.kind === 'task' && h.templateId === taskId && h.date === tk && h.who === displayWho);
+    if (existing) {
+      saveToCloud({ history: history.filter(h => h.id !== existing.id) });
+    } else {
       const rect = e.currentTarget.getBoundingClientRect();
-      triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[task.who].color);
-      saveToCloud({ history: [...history, { id: Date.now(), kind: 'task', templateId: taskId, date: tk, who: task.who }] });
+      triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[displayWho]?.color || '#3D2E1F');
+      saveToCloud({ history: [...history, { id: Date.now(), kind: 'task', templateId: taskId, date: tk, who: displayWho }] });
     }
   };
 
@@ -775,7 +795,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     triggerBigCelebration(family[job.who].name, family[job.who].color, job.reward.type === 'money' ? `+${formatMoney(job.reward.value)}` : `+${job.reward.value} puntos`);
     const updates = {
       jobInstances: jobInstances.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'done' } : i),
-      history: [...history, { id: Date.now(), kind: 'job', templateId: jobId, date: tk, who: job.who, title: job.title, ...(job.reward.type === 'points' ? { points: job.reward.value } : { money: job.reward.value }) }],
+      history: [...history, { id: Date.now(), kind: 'job', templateId: jobId, date: tk, who: job.who, title: job.title, ...(job.reward.type === 'points' ? { points: job.reward.value } : { money: job.reward.value })}],
     };
     if (job.reward.type === 'points') updates.points = { ...points, [job.who]: (points[job.who] || 0) + job.reward.value };
     else updates.money = { ...money, [job.who]: (money[job.who] || 0) + job.reward.value };
@@ -789,23 +809,36 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
 
   const requestPin = (onSuccess) => setPinPrompt({ onSuccess });
   const tryAdminLogin = (userId) => {
-    if (family[userId]?.role === 'pet') return; // mascotas no son perfil activo
+    if (family[userId]?.role === 'pet') return;
     if (family[userId]?.isAdmin) requestPin(() => setActiveUser(userId));
     else setActiveUser(userId);
   };
 
+  // ===== TAREAS =====
+  // Pueden ser individuales (who) o compartidas (whoIds con > 1)
   const saveTask = (data) => {
-    if (data.id) setTasks(tasks.map(t => t.id === data.id ? { ...t, ...data } : t));
-    else setTasks([...tasks, { ...data, id: Date.now() }]);
+    const isCompartida = Array.isArray(data.whoIds) && data.whoIds.length > 1;
+    let payload;
+    if (isCompartida) {
+      payload = { ...data, whoIds: data.whoIds, who: undefined };
+    } else if (Array.isArray(data.whoIds) && data.whoIds.length === 1) {
+      payload = { ...data, who: data.whoIds[0], whoIds: undefined };
+    } else {
+      payload = data;
+    }
+    if (data.id) setTasks(tasks.map(t => t.id === data.id ? { ...t, ...payload } : t));
+    else setTasks([...tasks, { ...payload, id: Date.now() }]);
     setModal(null);
   };
   const deleteTask = (id) => { setTasks(tasks.filter(t => t.id !== id)); setModal(null); };
+
   const saveJob = (data) => {
     if (data.id) setBigJobs(bigJobs.map(j => j.id === data.id ? { ...j, ...data } : j));
     else setBigJobs([...bigJobs, { ...data, id: Date.now() }]);
     setModal(null);
   };
   const deleteJob = (id) => { setBigJobs(bigJobs.filter(j => j.id !== id)); setModal(null); };
+
   const saveEvent = (data) => {
     if (data.id) setEvents(events.map(e => e.id === data.id ? { ...e, ...data } : e));
     else setEvents([...events, { ...data, id: Date.now() }]);
@@ -813,22 +846,18 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   };
   const deleteEvent = (id) => { setEvents(events.filter(e => e.id !== id)); setModal(null); };
 
-  // Guardar rutina: decide si va a routines[member] (individual) o routines.shared (compartida)
+  // ===== RUTINAS =====
   const saveRoutineItem = (member, data) => {
     const isCompartida = Array.isArray(data.whoIds) && data.whoIds.length > 1;
-
     if (isCompartida) {
-      // Va a routines.shared
       const sharedList = routines.shared || [];
       let newShared;
       if (data.id) {
-        // Ediciones: puede venir de individual->compartida o compartida->compartida
         const existsInShared = sharedList.some(r => r.id === data.id);
         if (existsInShared) {
           newShared = sharedList.map(r => r.id === data.id ? { ...r, ...data } : r);
           setRoutines({ ...routines, shared: newShared });
         } else {
-          // Era individual, la convertimos en compartida: quitar de [member] y agregar a shared
           const newMemberRoutines = (routines[member] || []).filter(r => r.id !== data.id);
           setRoutines({ ...routines, [member]: newMemberRoutines, shared: [...sharedList, { ...data }] });
         }
@@ -837,13 +866,10 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
         setRoutines({ ...routines, shared: newShared });
       }
     } else {
-      // Individual: va a routines[member] como antes
       const targetMember = (data.whoIds && data.whoIds[0]) || member;
       const sharedList = routines.shared || [];
       const existsInShared = data.id ? sharedList.some(r => r.id === data.id) : false;
-
       if (existsInShared) {
-        // Era compartida, ahora individual: quitar de shared y agregar a [target]
         const newShared = sharedList.filter(r => r.id !== data.id);
         const targetCurrent = routines[targetMember] || [];
         setRoutines({ ...routines, shared: newShared, [targetMember]: [...targetCurrent, { ...data }] });
@@ -860,7 +886,6 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   };
 
   const deleteRoutineItem = (member, id) => {
-    // Buscar si está en individual o en shared y eliminar
     const sharedList = routines.shared || [];
     if (sharedList.some(r => r.id === id)) {
       setRoutines({ ...routines, shared: sharedList.filter(r => r.id !== id) });
@@ -870,7 +895,6 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     setModal(null);
   };
 
-  // Aplicar template: crea N rutinas asignadas al/los miembro/s elegido/s
   const applyTemplate = (template, targetMemberIds) => {
     if (!Array.isArray(targetMemberIds) || targetMemberIds.length === 0) return;
     const isCompartida = targetMemberIds.length > 1;
@@ -879,6 +903,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       ...(step.label !== undefined ? { label: step.label } : { text: step.text }),
       icon: step.icon,
       points: step.points || 1,
+      timeOfDay: template.timeOfDay || 'any',
       recurrence: { type: 'daily', startDate: todayKey() },
       ...(isCompartida ? { whoIds: targetMemberIds } : {}),
     }));
@@ -894,6 +919,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     setModal(null);
   };
 
+  // ===== LISTAS =====
   const saveList = (data) => {
     if (data.id) setLists(lists.map(l => l.id === data.id ? { ...l, name: data.name, icon: data.icon } : l));
     else setLists([...lists, { ...data, id: Date.now(), items: [] }]);
@@ -911,17 +937,35 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const deleteListItem = (listId, itemId) => setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => i.id !== itemId) } : l));
   const clearCompletedItems = (listId) => setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => !i.done) } : l));
 
+  // ===== MENÚ DE COMIDAS =====
+  // meals tiene esta forma: { 'YYYY-MM-DD': { lunch: {id, name, custom}, dinner: {...} } }
+  const setMealForDate = (dKey, slot, mealData) => {
+    const newMeals = { ...meals };
+    if (!newMeals[dKey]) newMeals[dKey] = {};
+    if (mealData === null) {
+      delete newMeals[dKey][slot];
+      if (Object.keys(newMeals[dKey]).length === 0) delete newMeals[dKey];
+    } else {
+      newMeals[dKey] = { ...newMeals[dKey], [slot]: mealData };
+    }
+    setMeals(newMeals);
+  };
+
+  const toggleMealBalance = () => {
+    setFamilyConfig({ ...familyConfig, showMealBalance: !showMealBalance });
+  };
+
+  // ===== CONFIG =====
   const updateFamilyConfig = (newConfig) => {
     const allNewIds = [...newConfig.adults, ...newConfig.kids, ...newConfig.helpers, ...(newConfig.pets || [])].map(p => p.id);
     const newKidKeys = newConfig.kids.map(k => k.id);
     const cleanedRoutines = {};
     Object.keys(routines).forEach(k => {
       if (k === 'shared') {
-        // Para rutinas compartidas: solo conservar miembros válidos en whoIds
         const cleaned = (routines.shared || []).map(r => ({
           ...r,
           whoIds: (r.whoIds || []).filter(id => allNewIds.includes(id)),
-        })).filter(r => r.whoIds.length > 0); // si no queda nadie, eliminarla
+        })).filter(r => r.whoIds.length > 0);
         cleanedRoutines.shared = cleaned;
       } else if (allNewIds.includes(k)) {
         cleanedRoutines[k] = routines[k];
@@ -931,9 +975,18 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     newKidKeys.forEach(k => { cleanedPoints[k] = points[k] || 0; });
     const cleanedMoney = {};
     newKidKeys.forEach(k => { cleanedMoney[k] = money[k] || 0; });
+    // Limpiar tareas: si tiene whoIds, filtrar miembros válidos; si sólo tiene who, validar
+    const cleanedTasks = tasks.map(t => {
+      if (Array.isArray(t.whoIds)) {
+        const valid = t.whoIds.filter(id => allNewIds.includes(id));
+        if (valid.length === 0) return null;
+        return { ...t, whoIds: valid, who: valid.length === 1 ? valid[0] : undefined };
+      }
+      return allNewIds.includes(t.who) ? t : null;
+    }).filter(Boolean);
     saveToCloud({
       config: newConfig,
-      tasks: tasks.filter(t => allNewIds.includes(t.who)),
+      tasks: cleanedTasks,
       bigJobs: bigJobs.filter(j => allNewIds.includes(j.who)),
       events: events.filter(e => allNewIds.includes(e.who)),
       history: history.filter(h => allNewIds.includes(h.who)),
@@ -948,7 +1001,6 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
 
   const w = weather ? weatherCodeToInfo(weather.code) : null;
 
-  // Para el switcher, separamos personas de mascotas
   const peopleEntries = Object.entries(family).filter(([k, m]) => m.role !== 'pet');
   const petEntries = Object.entries(family).filter(([k, m]) => m.role === 'pet');
 
@@ -1020,11 +1072,12 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
         </div>
 
         <div className="main-content">
-          {activeTab === 'today'    && <TodayView family={family} kidKeys={kidKeys} events={filterByView(todaysEvents, e => e.who)} tasks={filterByView(todaysTasks, t => t.who)} points={points} toggleTask={toggleTask} />}
+          {activeTab === 'today'    && <TodayView family={family} kidKeys={kidKeys} events={filterByView(todaysEvents, e => e.who)} tasks={filterTasksByView(todaysTasksExpanded)} points={points} toggleTask={toggleTask} />}
           {activeTab === 'calendar' && <CalendarView family={family} events={filterByView(events, e => e.who)} isAdmin={isAdmin} setModal={setModal} />}
-          {activeTab === 'tasks'    && <TasksView family={family} todaysTasks={filterByView(todaysTasks, t => t.who)} toggleTask={toggleTask} isAdmin={isAdmin} setModal={setModal} />}
+          {activeTab === 'tasks'    && <TasksView family={family} tasks={filterTasksByView(todaysTasksExpanded)} toggleTask={toggleTask} isAdmin={isAdmin} setModal={setModal} />}
           {activeTab === 'routines' && <RoutinesView family={family} normalKidKeys={normalKidKeys} youngKidKeys={youngKidKeys} kidKeys={kidKeys} routines={routines} todaysRoutinesFor={todaysRoutinesFor} toggleRoutine={toggleRoutine} points={points} isAdmin={isAdmin} setModal={setModal} viewFilter={viewFilter} />}
           {activeTab === 'jobs'     && <JobsView family={family} kidKeys={kidKeys} bigJobs={bigJobs} todaysJobs={filterByView(todaysJobs, j => j.who)} submitJob={submitJob} validateJob={validateJob} rejectJob={rejectJob} money={money} points={points} isAdmin={isAdmin} setModal={setModal} />}
+          {activeTab === 'meals'    && <MealsView meals={meals} setMealForDate={setMealForDate} showBalance={showMealBalance} toggleBalance={toggleMealBalance} familySize={familyConfig.adults.length + familyConfig.kids.length} isAdmin={isAdmin} />}
           {activeTab === 'lists'    && <ListsView lists={lists} toggleListItem={toggleListItem} deleteListItem={deleteListItem} clearCompletedItems={clearCompletedItems} isAdmin={isAdmin} setModal={setModal} />}
           {activeTab === 'history'  && <HistoryView family={family} kidKeys={kidKeys} history={history} tasks={tasks} bigJobs={bigJobs} routines={routines} viewFilter={viewFilter} />}
         </div>
@@ -1037,6 +1090,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
           { id: 'tasks', label: 'Tareas', icon: CheckSquare },
           { id: 'routines', label: 'Rutinas', icon: Sparkles },
           { id: 'jobs', label: 'Trabajos', icon: Briefcase },
+          { id: 'meals', label: 'Menú', icon: UtensilsCrossed },
           { id: 'lists', label: 'Listas', icon: ListTodo },
           { id: 'history', label: 'Historial', icon: HistoryIcon },
         ].map(tab => {
@@ -1056,6 +1110,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       {modal && modal.type === 'routineTemplates' && <RoutineTemplatesModal member={modal.member} memberData={family[modal.member]} family={family} kidKeys={kidKeys} onApply={applyTemplate} onClose={() => setModal(null)} onCreateBlank={() => setModal({ type: 'routine', member: modal.member, data: null })} />}
       {modal && modal.type === 'list' && <ListModal data={modal.data} onSave={saveList} onDelete={deleteList} onClose={() => setModal(null)} />}
       {modal && modal.type === 'listItem' && <ListItemModal data={modal.data} listId={modal.listId} onSave={(d) => saveListItem(modal.listId, d)} onClose={() => setModal(null)} />}
+      {modal && modal.type === 'mealPicker' && <MealPickerModal initialDate={modal.dateKey} initialSlot={modal.slot} initialMeal={modal.meal} onSelect={(dKey, slot, meal) => setMealForDate(dKey, slot, meal)} onClose={() => setModal(null)} />}
       {pinPrompt && <PinPrompt onSuccess={() => { pinPrompt.onSuccess(); setPinPrompt(null); }} onCancel={() => setPinPrompt(null)} />}
       {showSettings && <SettingsModal config={familyConfig} familyCode={familyCode} onUpdate={updateFamilyConfig} onClose={() => setShowSettings(false)} onResetFamily={onResetFamily} />}
     </div>
@@ -1112,6 +1167,8 @@ function MainStyles() {
       .recurrence-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #8A7560; background: #F5EFE6; padding: 3px 8px; border-radius: 999px; font-weight: 500; }
       .points-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #A67C12; background: #FFF4E0; padding: 3px 8px; border-radius: 999px; font-weight: 600; }
       .shared-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: #5C7D42; background: #EDF4E2; padding: 2px 7px; border-radius: 999px; font-weight: 600; }
+      .time-pill { padding: 8px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600; border: 1.5px solid #E8DEC9; background: white; color: #3D2E1F; display: inline-flex; align-items: center; gap: 6px; }
+      .time-pill.selected { background: #3D2E1F; color: white; border-color: #3D2E1F; }
       @keyframes confettiFly { 0% { transform: translate(0,0) rotate(0deg); opacity: 1; } 100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); opacity: 0; } }
       @keyframes pointsRise { 0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; } 15% { transform: translate(-50%, -10px) scale(1.3); opacity: 1; } 100% { transform: translate(-50%, -90px) scale(1); opacity: 0; } }
       @keyframes bigPop { 0% { transform: translate(-50%,-50%) scale(0.3); opacity: 0; } 15% { transform: translate(-50%,-50%) scale(1.15); opacity: 1; } 25% { transform: translate(-50%,-50%) scale(1); opacity: 1; } 85% { transform: translate(-50%,-50%) scale(1); opacity: 1; } 100% { transform: translate(-50%,-50%) scale(0.9); opacity: 0; } }
@@ -1144,6 +1201,13 @@ function MainStyles() {
       .template-card { background: white; border: 2px solid #E8DEC9; border-radius: 16px; padding: 16px; cursor: pointer; transition: all 0.15s; text-align: left; font-family: inherit; color: #3D2E1F; width: 100%; }
       .template-card:hover { border-color: #3D2E1F; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(61,46,31,0.1); }
       .template-card.selected { border-color: #3D2E1F; background: #FBF5E9; }
+      .meal-day-cell { background: white; border: 1px solid #E8DEC9; border-radius: 10px; padding: 6px; min-height: 70px; display: flex; flex-direction: column; gap: 4px; transition: all 0.15s; }
+      .meal-day-cell.today { border-color: #3D2E1F; border-width: 2px; }
+      .meal-day-cell.other-month { opacity: 0.35; }
+      .meal-slot { background: #FBF5E9; border-radius: 6px; padding: 4px 6px; font-size: 10px; cursor: pointer; line-height: 1.2; min-height: 22px; display: flex; align-items: center; gap: 4px; }
+      .meal-slot.empty { background: transparent; border: 1px dashed #D4C5B0; color: #B8A78C; justify-content: center; }
+      .meal-slot:hover { background: #F5EFE6; }
+      .meal-slot.empty:hover { background: #FBF5E9; }
       .app-container { max-width: 1600px; margin: 0 auto; }
       .header-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 24px; padding: 20px 32px 16px; }
       .header-row > .header-left { justify-self: start; }
@@ -1210,11 +1274,14 @@ function TodayView({ family, kidKeys, events, tasks, points, toggleTask }) {
           <div className="serif" style={{ fontSize: '20px', fontWeight: 600, marginBottom: '14px' }}>Pendientes</div>
           {pendingTasks.length === 0 && <div style={{ color: '#8A7560', fontSize: '13px' }}>Todo listo por hoy ✨</div>}
           {pendingTasks.map(t => (
-            <div key={t.id} onClick={(e) => toggleTask(t.id, e)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', cursor: 'pointer' }}>
+            <div key={`${t.id}-${t._displayWho}`} onClick={(e) => toggleTask(t.id, t._displayWho, e)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', cursor: 'pointer' }}>
               <div className={`checkbox ${t.done ? 'done' : ''}`}>{t.done && <Check size={16} color="#FDFAF3" strokeWidth={3} />}</div>
-              <div style={{ flex: 1, fontSize: '14px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</div>
-              <div className="avatar" style={{ background: family[t.who]?.color || '#999', width: '28px', height: '28px', fontSize: '12px' }}>
-                {family[t.who]?.role === 'pet' ? family[t.who].emoji : family[t.who]?.initial}
+              <div style={{ flex: 1, fontSize: '14px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {t.text}
+                {isSharedItem(t) && <span className="shared-badge" style={{ marginLeft: '6px' }}><Users size={9} /> Compartida</span>}
+              </div>
+              <div className="avatar" style={{ background: family[t._displayWho]?.color || '#999', width: '28px', height: '28px', fontSize: '12px' }}>
+                {family[t._displayWho]?.role === 'pet' ? family[t._displayWho].emoji : family[t._displayWho]?.initial}
               </div>
             </div>
           ))}
@@ -1260,26 +1327,27 @@ function CalendarView({ family, events, isAdmin, setModal }) {
   );
 }
 
-function TasksView({ family, todaysTasks, toggleTask, isAdmin, setModal }) {
+function TasksView({ family, tasks, toggleTask, isAdmin, setModal }) {
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div className="serif" style={{ fontSize: '28px', fontWeight: 600 }}>Tareas de hoy</div>
         {isAdmin && <button className="btn-primary" onClick={() => setModal({ type: 'task', data: null })}><Plus size={16} /> Nueva tarea</button>}
       </div>
-      {todaysTasks.length === 0 && <div style={{ color: '#8A7560', padding: '12px 0' }}>Sin tareas para hoy.</div>}
-      {todaysTasks.map(t => (
-        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 0', borderBottom: '1px solid #F5EFE6', opacity: t.done ? 0.5 : 1 }}>
-          <div onClick={(e) => toggleTask(t.id, e)} className={`checkbox ${t.done ? 'done' : ''}`} style={{ cursor: 'pointer' }}>{t.done && <Check size={16} color="#FDFAF3" strokeWidth={3} />}</div>
-          <div style={{ flex: 1, cursor: 'pointer', minWidth: 0 }} onClick={(e) => toggleTask(t.id, e)}>
+      {tasks.length === 0 && <div style={{ color: '#8A7560', padding: '12px 0' }}>Sin tareas para hoy.</div>}
+      {tasks.map(t => (
+        <div key={`${t.id}-${t._displayWho}`} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 0', borderBottom: '1px solid #F5EFE6', opacity: t.done ? 0.5 : 1 }}>
+          <div onClick={(e) => toggleTask(t.id, t._displayWho, e)} className={`checkbox ${t.done ? 'done' : ''}`} style={{ cursor: 'pointer' }}>{t.done && <Check size={16} color="#FDFAF3" strokeWidth={3} />}</div>
+          <div style={{ flex: 1, cursor: 'pointer', minWidth: 0 }} onClick={(e) => toggleTask(t.id, t._displayWho, e)}>
             <div style={{ fontSize: '14px', fontWeight: 500, textDecoration: t.done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</div>
             <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
               {t.time && <div style={{ fontSize: '11px', color: '#8A7560' }}>⏰ {t.time}</div>}
               <div className="recurrence-badge"><Repeat size={10} />{recurrenceLabel(t.recurrence)}</div>
+              {isSharedItem(t) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
             </div>
           </div>
-          <div className="avatar" style={{ background: family[t.who]?.color || '#999' }}>
-            {family[t.who]?.role === 'pet' ? family[t.who].emoji : family[t.who]?.initial}
+          <div className="avatar" style={{ background: family[t._displayWho]?.color || '#999' }}>
+            {family[t._displayWho]?.role === 'pet' ? family[t._displayWho].emoji : family[t._displayWho]?.initial}
           </div>
           {isAdmin && <button onClick={() => setModal({ type: 'task', data: t })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#8A7560' }}><Edit2 size={16} /></button>}
         </div>
@@ -1292,6 +1360,35 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
   const ranking = kidKeys.map(k => ({ k, ...family[k], pts: points[k] || 0 })).sort((a,b) => b.pts - a.pts);
   const visibleNormal = viewFilter === 'all' ? normalKidKeys : (normalKidKeys.includes(viewFilter) ? [viewFilter] : []);
   const visibleYoung = viewFilter === 'all' ? youngKidKeys : (youngKidKeys.includes(viewFilter) ? [viewFilter] : []);
+
+  // Filtro por momento del día. Default: el momento actual.
+  const [timeFilter, setTimeFilter] = useState(() => getCurrentTimeOfDay());
+
+  const filterByTime = (items) => {
+    if (timeFilter === 'all') return items;
+    return items.filter(item => {
+      const t = getRoutineTimeOfDay(item);
+      return t === timeFilter || t === 'any';
+    });
+  };
+
+  const TimeFilterBar = () => (
+    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px', alignItems: 'center' }}>
+      <span style={{ fontSize: '12px', color: '#8A7560', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '4px' }}>Momento:</span>
+      <button className={`time-pill ${timeFilter === 'morning' ? 'selected' : ''}`} onClick={() => setTimeFilter('morning')}>
+        <Sunrise size={14} /> Mañana
+      </button>
+      <button className={`time-pill ${timeFilter === 'afternoon' ? 'selected' : ''}`} onClick={() => setTimeFilter('afternoon')}>
+        <Sun size={14} /> Tarde
+      </button>
+      <button className={`time-pill ${timeFilter === 'evening' ? 'selected' : ''}`} onClick={() => setTimeFilter('evening')}>
+        <Moon size={14} /> Noche
+      </button>
+      <button className={`time-pill ${timeFilter === 'all' ? 'selected' : ''}`} onClick={() => setTimeFilter('all')}>
+        Todo el día
+      </button>
+    </div>
+  );
 
   return (
     <div>
@@ -1320,12 +1417,15 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
         </div>
       )}
 
-      <div className="serif" style={{ fontSize: '24px', fontWeight: 600, marginBottom: '16px' }}>Rutinas de hoy</div>
+      <div className="serif" style={{ fontSize: '24px', fontWeight: 600, marginBottom: '12px' }}>Rutinas de hoy</div>
+      <TimeFilterBar />
+
       {visibleNormal.length === 0 && visibleYoung.length === 0 && <div style={{ color: '#8A7560' }}>Seleccioná un menor en el filtro de arriba.</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
         {visibleNormal.map(kid => {
           const m = family[kid];
-          const r = todaysRoutinesFor(kid);
+          const allR = todaysRoutinesFor(kid);
+          const r = filterByTime(allR);
           const done = r.filter(i => i.done).length;
           return (
             <div key={kid} className="card">
@@ -1333,7 +1433,7 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
                 <div className="avatar" style={{ background: m.color, width: '40px', height: '40px', fontSize: '16px' }}>{m.initial}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="serif" style={{ fontSize: '20px', fontWeight: 600 }}>{m.name}</div>
-                  <div style={{ fontSize: '12px', color: '#8A7560' }}>{done} de {r.length}</div>
+                  <div style={{ fontSize: '12px', color: '#8A7560' }}>{done} de {r.length}{timeFilter !== 'all' && allR.length !== r.length ? ` (${allR.length} total)` : ''}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div className="serif" style={{ fontSize: '18px', fontWeight: 700, color: m.color }}>{points[kid] || 0}</div>
@@ -1343,29 +1443,39 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
               <div style={{ height: '6px', background: '#F5EFE6', borderRadius: '3px', marginBottom: '14px', overflow: 'hidden' }}>
                 <div style={{ width: r.length ? `${(done / r.length) * 100}%` : '0%', height: '100%', background: m.color, transition: 'width 0.4s ease' }}/>
               </div>
-              {r.map(item => (
-                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', marginBottom: '5px', borderRadius: '10px', background: item.done ? '#FBF5E9' : 'transparent' }}>
-                  <div onClick={(e) => toggleRoutine(kid, item.id, e)} style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, cursor: 'pointer', minWidth: 0 }}>
-                    <div style={{ fontSize: '22px' }}>{item.icon}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '13px', fontWeight: 500, textDecoration: item.done ? 'line-through' : 'none', opacity: item.done ? 0.5 : 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.text}</div>
-                      <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
-                        <div className="points-badge">{item.points || 1} pt{(item.points || 1) > 1 ? 's' : ''}</div>
-                        {isShared(item) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
-                      </div>
-                    </div>
-                    <div className={`checkbox ${item.done ? 'done' : ''}`} style={{ width: '22px', height: '22px' }}>{item.done && <Check size={13} color="#FDFAF3" strokeWidth={3} />}</div>
-                  </div>
-                  {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', color: '#8A7560' }}><Edit2 size={14} /></button>}
+              {r.length === 0 && (
+                <div style={{ fontSize: '12px', color: '#8A7560', textAlign: 'center', padding: '8px 0', fontStyle: 'italic' }}>
+                  {timeFilter === 'all' ? 'Sin rutinas hoy' : `Sin rutinas para ${getTimeOfDayInfo(timeFilter).label.toLowerCase()}`}
                 </div>
-              ))}
+              )}
+              {r.map(item => {
+                const tod = getRoutineTimeOfDay(item);
+                const todInfo = getTimeOfDayInfo(tod);
+                return (
+                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', marginBottom: '5px', borderRadius: '10px', background: item.done ? '#FBF5E9' : 'transparent' }}>
+                    <div onClick={(e) => toggleRoutine(kid, item.id, e)} style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, cursor: 'pointer', minWidth: 0 }}>
+                      <div style={{ fontSize: '22px' }}>{item.icon}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 500, textDecoration: item.done ? 'line-through' : 'none', opacity: item.done ? 0.5 : 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.text}</div>
+                        <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                          <div className="points-badge">{item.points || 1} pt{(item.points || 1) > 1 ? 's' : ''}</div>
+                          {tod !== 'any' && <div className="recurrence-badge">{todInfo.emoji} {todInfo.label}</div>}
+                          {isSharedItem(item) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
+                        </div>
+                      </div>
+                      <div className={`checkbox ${item.done ? 'done' : ''}`} style={{ width: '22px', height: '22px' }}>{item.done && <Check size={13} color="#FDFAF3" strokeWidth={3} />}</div>
+                    </div>
+                    {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', color: '#8A7560' }}><Edit2 size={14} /></button>}
+                  </div>
+                );
+              })}
               {isAdmin && (
                 <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
                   <button onClick={() => setModal({ type: 'routineTemplates', member: kid })} style={{ flex: 1, padding: '10px', background: '#FBF5E9', border: '1.5px solid #E8DEC9', borderRadius: '12px', color: '#3D2E1F', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                    <Wand2 size={14} /> Usar plantilla
+                    <Wand2 size={14} /> Plantilla
                   </button>
                   <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ flex: 1, padding: '10px', background: 'transparent', border: '1.5px dashed #D4C5B0', borderRadius: '12px', color: '#8A7560', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                    <Plus size={14} /> Agregar paso
+                    <Plus size={14} /> Agregar
                   </button>
                 </div>
               )}
@@ -1375,7 +1485,8 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
 
         {visibleYoung.map(kid => {
           const m = family[kid];
-          const r = todaysRoutinesFor(kid);
+          const allR = todaysRoutinesFor(kid);
+          const r = filterByTime(allR);
           return (
             <div key={kid} className="card" style={{ background: '#FFF8EE' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
@@ -1389,6 +1500,11 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
                   <div style={{ fontSize: '10px', color: '#8A7560' }}>puntos</div>
                 </div>
               </div>
+              {r.length === 0 && (
+                <div style={{ fontSize: '12px', color: '#8A7560', textAlign: 'center', padding: '12px', fontStyle: 'italic' }}>
+                  {timeFilter === 'all' ? 'Sin rutinas hoy' : `Sin rutinas para ${getTimeOfDayInfo(timeFilter).label.toLowerCase()}`}
+                </div>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 {r.map(item => (
                   <div key={item.id} style={{ position: 'relative' }}>
@@ -1560,10 +1676,8 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
     return { k, ...family[k], routinesDone: kidHist.filter(h => h.kind === 'routine').length, jobsDone: kidHist.filter(h => h.kind === 'job').length, moneyEarned: kidHist.reduce((s, h) => s + (h.money || 0), 0), pointsEarned: kidHist.reduce((s, h) => s + (h.points || 0), 0) };
   });
   const findRoutineTitle = (h) => {
-    // Buscar en routines[h.who] (individual)
     const direct = (routines[h.who] || []).find(rt => rt.id === h.templateId);
     if (direct) return direct.text || direct.label || '?';
-    // Buscar en routines.shared (compartida)
     const shared = (routines.shared || []).find(rt => rt.id === h.templateId);
     if (shared) return shared.text || shared.label || '?';
     return '?';
@@ -1617,6 +1731,418 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
             {h.money && <div style={{ fontSize: '12px', fontWeight: 700, color: '#7BA05B' }}>+${h.money.toLocaleString('es-AR')}</div>}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+// ============================================================================
+// MENU DE COMIDAS
+// ============================================================================
+
+function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySize, isAdmin }) {
+  const [cursor, setCursor] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [pickerState, setPickerState] = useState(null);
+
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const monthLabel = `${MONTHS[month]} ${year}`;
+
+  // Generar las 6 semanas del mes (42 celdas)
+  const cells = useMemo(() => {
+    const firstDay = new Date(year, month, 1);
+    const startDow = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1; // lunes = 0
+    const cells = [];
+    const start = new Date(year, month, 1 - startDow);
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      d.setHours(0, 0, 0, 0);
+      cells.push(d);
+    }
+    return cells;
+  }, [year, month]);
+
+  const tk = todayKey();
+
+  const goPrev = () => setCursor(new Date(year, month - 1, 1));
+  const goNext = () => setCursor(new Date(year, month + 1, 1));
+  const goToday = () => { const d = new Date(); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); };
+
+  const openPicker = (dateKey, slot, meal) => setPickerState({ dateKey, slot, meal });
+  const closePicker = () => setPickerState(null);
+
+  const onPickMeal = (meal) => {
+    if (!pickerState) return;
+    setMealForDate(pickerState.dateKey, pickerState.slot, meal);
+    closePicker();
+  };
+  const onClearMeal = () => {
+    if (!pickerState) return;
+    setMealForDate(pickerState.dateKey, pickerState.slot, null);
+    closePicker();
+  };
+
+  // Para el balance: contamos todos los platos cargados en el MES VISIBLE (lunch + dinner)
+  // Los normalizamos a "veces por semana" dividiendo por 4.3 (semanas por mes promedio)
+  const balanceData = useMemo(() => {
+    const counts = {};
+    MEAL_BALANCE_CATEGORIES.forEach(c => { counts[c.id] = 0; });
+    cells.forEach(d => {
+      if (d.getMonth() !== month) return; // sólo del mes actual
+      const k = dateKey(d);
+      const day = meals[k];
+      if (!day) return;
+      [day.lunch, day.dinner].forEach(meal => {
+        if (!meal) return;
+        // El meal puede tener id (catálogo) o ser custom (sólo name)
+        if (meal.id) {
+          const fullMeal = getMealById(meal.id);
+          if (fullMeal) {
+            mealBalanceCategories(fullMeal).forEach(catId => { counts[catId] = (counts[catId] || 0) + 1; });
+          }
+        }
+      });
+    });
+    // Normalizar: todos los conteos los pasamos a "veces por semana"
+    const weeksInMonth = 4.3;
+    const perWeek = {};
+    Object.keys(counts).forEach(k => { perWeek[k] = counts[k] / weeksInMonth; });
+    return { counts, perWeek };
+  }, [cells, meals, month]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="serif" style={{ fontSize: '28px', fontWeight: 600 }}>Menú de comidas</div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {isAdmin && (
+            <button className="btn-ghost" onClick={toggleBalance} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <PieChart size={14} /> {showBalance ? 'Ocultar balance' : 'Mostrar balance'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Navegación de mes */}
+      <div className="card" style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button onClick={goPrev} className="btn-ghost" style={{ padding: '8px 10px' }}><ChevronLeft size={16} /></button>
+            <div className="serif" style={{ fontSize: '22px', fontWeight: 600, minWidth: '180px', textAlign: 'center', textTransform: 'capitalize' }}>{monthLabel}</div>
+            <button onClick={goNext} className="btn-ghost" style={{ padding: '8px 10px' }}><ChevronRight size={16} /></button>
+          </div>
+          <button onClick={goToday} className="btn-ghost">Hoy</button>
+        </div>
+
+        {/* Cabecera de días */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginBottom: '6px' }}>
+          {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d => (
+            <div key={d} style={{ fontSize: '11px', color: '#8A7560', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center', padding: '4px 0' }}>{d}</div>
+          ))}
+        </div>
+
+        {/* Grilla del mes */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+          {cells.map((d, idx) => {
+            const inMonth = d.getMonth() === month;
+            const k = dateKey(d);
+            const isToday = k === tk;
+            const day = meals[k] || {};
+            return (
+              <div key={idx} className={`meal-day-cell ${isToday ? 'today' : ''} ${!inMonth ? 'other-month' : ''}`}>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: isToday ? '#3D2E1F' : '#8A7560', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{d.getDate()}</span>
+                </div>
+                <MealSlot
+                  label="A"
+                  meal={day.lunch}
+                  onClick={() => isAdmin && openPicker(k, 'lunch', day.lunch)}
+                  disabled={!isAdmin}
+                />
+                <MealSlot
+                  label="C"
+                  meal={day.dinner}
+                  onClick={() => isAdmin && openPicker(k, 'dinner', day.dinner)}
+                  disabled={!isAdmin}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize: '11px', color: '#8A7560', marginTop: '12px', textAlign: 'center' }}>
+          A = Almuerzo · C = Cena · {familySize} {familySize === 1 ? 'persona' : 'personas'}
+        </div>
+      </div>
+
+      {/* Balance */}
+      {showBalance && <BalanceCard balanceData={balanceData} />}
+
+      {pickerState && (
+        <MealPickerModal
+          dateKey={pickerState.dateKey}
+          slot={pickerState.slot}
+          currentMeal={pickerState.meal}
+          onSelect={onPickMeal}
+          onClear={onClearMeal}
+          onClose={closePicker}
+        />
+      )}
+    </div>
+  );
+}
+
+function MealSlot({ label, meal, onClick, disabled }) {
+  if (!meal) {
+    return (
+      <div className="meal-slot empty" onClick={disabled ? undefined : onClick} style={disabled ? { cursor: 'default' } : {}}>
+        <span style={{ fontSize: '9px', fontWeight: 700, opacity: 0.5 }}>{label}</span>
+        {!disabled && <Plus size={10} />}
+      </div>
+    );
+  }
+  const fullMeal = meal.id ? getMealById(meal.id) : null;
+  const emoji = fullMeal?.emoji || '🍽️';
+  const name = fullMeal?.name || meal.name || 'Sin nombre';
+  return (
+    <div className="meal-slot" onClick={disabled ? undefined : onClick} style={disabled ? { cursor: 'default' } : {}} title={`${label === 'A' ? 'Almuerzo' : 'Cena'}: ${name}`}>
+      <span style={{ fontSize: '9px', fontWeight: 700, color: '#8A7560' }}>{label}</span>
+      <span style={{ fontSize: '12px' }}>{emoji}</span>
+      <span style={{ fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+    </div>
+  );
+}
+
+// Donut anidada: anillo externo = sugerido, anillo interno = real
+function BalanceCard({ balanceData }) {
+  const { perWeek } = balanceData;
+  // Excluimos 'fried' del cálculo principal (es un límite, no objetivo). Lo mostramos aparte.
+  const objectives = MEAL_BALANCE_CATEGORIES.filter(c => !c.isLimit);
+  const limits = MEAL_BALANCE_CATEGORIES.filter(c => c.isLimit);
+
+  // Calcular porcentajes para cada anillo
+  const totalSuggested = objectives.reduce((s, c) => s + c.suggested, 0);
+  const totalActual = objectives.reduce((s, c) => s + (perWeek[c.id] || 0), 0);
+
+  // Ring config
+  const size = 280;
+  const cx = size / 2;
+  const cy = size / 2;
+  const outerR = 110;
+  const outerStroke = 22;
+  const innerR = 78;
+  const innerStroke = 22;
+
+  const polar = (radius, angle) => {
+    const rad = (angle - 90) * Math.PI / 180;
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  };
+
+  const arcPath = (radius, startAngle, endAngle) => {
+    const start = polar(radius, endAngle);
+    const end = polar(radius, startAngle);
+    const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
+    return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 0 ${end.x} ${end.y}`;
+  };
+
+  // Outer ring (sugerido)
+  let outerCursor = 0;
+  const outerSegments = objectives.map(cat => {
+    const portion = (cat.suggested / totalSuggested) * 360;
+    const seg = { id: cat.id, startAngle: outerCursor, endAngle: outerCursor + portion, color: cat.color, label: cat.label, value: cat.suggested };
+    outerCursor += portion;
+    return seg;
+  });
+
+  // Inner ring (real)
+  let innerCursor = 0;
+  const innerSegments = totalActual > 0 ? objectives.map(cat => {
+    const v = perWeek[cat.id] || 0;
+    const portion = (v / totalActual) * 360;
+    const seg = { id: cat.id, startAngle: innerCursor, endAngle: innerCursor + portion, color: cat.color, label: cat.label, value: v };
+    innerCursor += portion;
+    return seg;
+  }) : [];
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+        <PieChart size={20} color="#3D2E1F" />
+        <div className="serif" style={{ fontSize: '20px', fontWeight: 600 }}>Balance del mes</div>
+      </div>
+      <p style={{ fontSize: '12px', color: '#8A7560', marginBottom: '20px', lineHeight: 1.5 }}>
+        Anillo exterior: distribución <strong>sugerida</strong> para una alimentación variada · Anillo interior: <strong>tu menú actual</strong> normalizado por semana
+      </p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ maxWidth: '100%', height: 'auto' }}>
+            {/* Outer ring background */}
+            <circle cx={cx} cy={cy} r={outerR} fill="none" stroke="#F5EFE6" strokeWidth={outerStroke} />
+            {/* Outer ring (sugerido) */}
+            {outerSegments.map(seg => (
+              <path key={`o-${seg.id}`} d={arcPath(outerR, seg.startAngle, seg.endAngle)} fill="none" stroke={seg.color} strokeWidth={outerStroke} strokeLinecap="butt" opacity={0.55} />
+            ))}
+            {/* Inner ring background */}
+            <circle cx={cx} cy={cy} r={innerR} fill="none" stroke="#F5EFE6" strokeWidth={innerStroke} />
+            {/* Inner ring (real) */}
+            {innerSegments.map(seg => (
+              <path key={`i-${seg.id}`} d={arcPath(innerR, seg.startAngle, seg.endAngle)} fill="none" stroke={seg.color} strokeWidth={innerStroke} strokeLinecap="butt" />
+            ))}
+            {/* Center text */}
+            <text x={cx} y={cy - 8} textAnchor="middle" fontFamily="Fraunces, serif" fontWeight="700" fontSize="22" fill="#3D2E1F">{totalActual.toFixed(1)}</text>
+            <text x={cx} y={cy + 14} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="11" fill="#8A7560">cargas/sem</text>
+            {totalActual === 0 && (
+              <text x={cx} y={cy + 36} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="10" fill="#8A7560" fontStyle="italic">Cargá platos para ver</text>
+            )}
+          </svg>
+        </div>
+
+        {/* Leyenda con barras de comparación */}
+        <div style={{ minWidth: '220px', flex: 1 }}>
+          {objectives.map(cat => {
+            const actual = perWeek[cat.id] || 0;
+            const suggested = cat.suggested;
+            const ratio = suggested > 0 ? Math.min(actual / suggested, 1.5) : 0;
+            const status = actual === 0 ? 'empty' : actual < suggested * 0.7 ? 'low' : actual > suggested * 1.4 ? 'high' : 'ok';
+            return (
+              <div key={cat.id} style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: cat.color }} />
+                    <span style={{ fontSize: '13px', fontWeight: 600 }}>{cat.label}</span>
+                  </div>
+                  <span style={{ fontSize: '12px', color: '#8A7560' }}>
+                    <strong style={{ color: '#3D2E1F' }}>{actual.toFixed(1)}</strong> / {suggested}<span style={{ fontSize: '10px' }}>×sem</span>
+                  </span>
+                </div>
+                <div style={{ height: '6px', background: '#F5EFE6', borderRadius: '3px', overflow: 'hidden', position: 'relative' }}>
+                  <div style={{ width: `${(actual / Math.max(suggested * 1.5, 0.1)) * 100}%`, maxWidth: '100%', height: '100%', background: cat.color, transition: 'width 0.4s ease', opacity: status === 'empty' ? 0.3 : 1 }}/>
+                  {/* Marcador del objetivo */}
+                  <div style={{ position: 'absolute', left: `${(suggested / Math.max(suggested * 1.5, 0.1)) * 100}%`, top: '-2px', bottom: '-2px', width: '2px', background: '#3D2E1F', opacity: 0.4 }}/>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Límites (frituras) */}
+          {limits.map(cat => {
+            const actual = perWeek[cat.id] || 0;
+            const limit = cat.suggested;
+            const overLimit = actual > limit;
+            return (
+              <div key={cat.id} style={{ marginTop: '14px', padding: '10px 12px', background: overLimit ? '#FCEBE6' : '#FBF5E9', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: cat.color }} />
+                    <span style={{ fontSize: '12px', fontWeight: 600 }}>{cat.label}</span>
+                    <span style={{ fontSize: '10px', color: '#8A7560', fontStyle: 'italic' }}>(máx sugerido {limit}/sem)</span>
+                  </div>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: overLimit ? '#C0392B' : '#3D2E1F' }}>{actual.toFixed(1)}×sem</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MealPickerModal({ dateKey: dKey, slot, currentMeal, onSelect, onClear, onClose }) {
+  const [search, setSearch] = useState('');
+  const [customName, setCustomName] = useState('');
+  const [tab, setTab] = useState('catalog');
+
+  const slotLabel = slot === 'lunch' ? 'Almuerzo' : 'Cena';
+  const dateObj = parseKey(dKey);
+  const dateLabel = `${DAYS_FULL[dateObj.getDay()]} ${dateObj.getDate()} de ${MONTHS[dateObj.getMonth()]}`;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return MEAL_CATALOG;
+    return MEAL_CATALOG.filter(m => m.name.toLowerCase().includes(q) || m.category.toLowerCase().includes(q));
+  }, [search]);
+
+  // Agrupar por categoría
+  const byCategory = useMemo(() => {
+    const groups = {};
+    filtered.forEach(m => {
+      if (!groups[m.category]) groups[m.category] = [];
+      groups[m.category].push(m);
+    });
+    return groups;
+  }, [filtered]);
+
+  const handlePickFromCatalog = (meal) => {
+    onSelect({ id: meal.id });
+  };
+  const handleSaveCustom = () => {
+    if (!customName.trim()) return;
+    onSelect({ name: customName.trim() });
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <div>
+            <div className="serif" style={{ fontSize: '22px', fontWeight: 600 }}>{slotLabel}</div>
+            <div style={{ fontSize: '12px', color: '#8A7560', textTransform: 'capitalize' }}>{dateLabel}</div>
+          </div>
+          <button onClick={onClose} style={{ background: '#FBF5E9', border: 'none', borderRadius: '50%', width: '34px', height: '34px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={17} /></button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '6px', marginTop: '14px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <div className={`tab-pill ${tab === 'catalog' ? 'selected' : ''}`} onClick={() => setTab('catalog')}>Sugerencias</div>
+          <div className={`tab-pill ${tab === 'custom' ? 'selected' : ''}`} onClick={() => setTab('custom')}>Escribir a mano</div>
+        </div>
+
+        {tab === 'catalog' && (
+          <div>
+            <input className="input" placeholder="Buscar plato..." value={search} onChange={(e) => setSearch(e.target.value)} autoFocus style={{ marginBottom: '14px' }} />
+            <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '4px' }}>
+              {Object.keys(byCategory).length === 0 && <div style={{ color: '#8A7560', textAlign: 'center', padding: '30px 0' }}>No se encontraron platos.</div>}
+              {Object.keys(byCategory).map(cat => (
+                <div key={cat} style={{ marginBottom: '14px' }}>
+                  <div style={{ fontSize: '11px', color: '#8A7560', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>{cat}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '6px' }}>
+                    {byCategory[cat].map(m => {
+                      const isCurrent = currentMeal?.id === m.id;
+                      return (
+                        <button key={m.id} onClick={() => handlePickFromCatalog(m)} style={{ background: isCurrent ? '#3D2E1F' : 'white', color: isCurrent ? 'white' : '#3D2E1F', border: `1.5px solid ${isCurrent ? '#3D2E1F' : '#E8DEC9'}`, borderRadius: '10px', padding: '8px 10px', cursor: 'pointer', fontFamily: 'inherit', fontSize: '12px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px', minHeight: '44px' }}>
+                          <span style={{ fontSize: '18px' }}>{m.emoji}</span>
+                          <span style={{ flex: 1, lineHeight: 1.2 }}>{m.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab === 'custom' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '14px' }}>Si tu plato no está en el catálogo, escribilo a mano. No se incluirá en el balance.</p>
+            <div className="field"><div className="label">Nombre del plato</div>
+              <input className="input" value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Ej: Pollo con curry y arroz" autoFocus onKeyDown={(e) => e.key === 'Enter' && handleSaveCustom()} maxLength={60} />
+            </div>
+            <button className="btn-primary" onClick={handleSaveCustom} disabled={!customName.trim()} style={{ width: '100%', justifyContent: 'center' }}>Guardar plato</button>
+          </div>
+        )}
+
+        {currentMeal && (
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-start' }}>
+            <button className="btn-danger" onClick={onClear}>
+              <Trash2 size={14} /> Quitar este plato
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1900,8 +2426,7 @@ function PersonPicker({ family, value, onChange, label = 'Asignar a' }) {
   );
 }
 
-function MultiPersonPicker({ family, kidKeys, values, onChange, label = 'Asignar a' }) {
-  // Solo permite asignar rutinas a hijos
+function MultiPersonPicker({ family, allowedKeys, values, onChange, label = 'Asignar a', emptyMessage = '' }) {
   const toggle = (k) => {
     if (values.includes(k)) onChange(values.filter(v => v !== k));
     else onChange([...values, k]);
@@ -1909,15 +2434,20 @@ function MultiPersonPicker({ family, kidKeys, values, onChange, label = 'Asignar
   return (
     <div className="field">
       <div className="label">{label}</div>
-      <p style={{ fontSize: '11px', color: '#8A7560', marginBottom: '8px', fontStyle: 'italic' }}>Si elegís a más de uno, queda como rutina compartida: cada uno la marca en lo suyo y suma puntos individualmente.</p>
+      <p style={{ fontSize: '11px', color: '#8A7560', marginBottom: '8px', fontStyle: 'italic' }}>Si elegís a más de uno, queda compartida: cada uno la marca en lo suyo.</p>
+      {emptyMessage && allowedKeys.length === 0 && <p style={{ fontSize: '12px', color: '#C0392B' }}>{emptyMessage}</p>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-        {kidKeys.map(k => {
+        {allowedKeys.map(k => {
           const m = family[k];
           if (!m) return null;
           const selected = values.includes(k);
           return (
             <div key={k} className={`person-chip ${selected ? 'selected' : ''}`} style={{ '--clr': m.color }} onClick={() => toggle(k)}>
-              <div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '11px' }}>{m.initial}</div>
+              {m.role === 'pet' ? (
+                <div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '13px' }}>{m.emoji}</div>
+              ) : (
+                <div className="avatar" style={{ background: m.color, width: '22px', height: '22px', fontSize: '11px' }}>{m.initial}</div>
+              )}
               {m.name}
               {selected && <Check size={13} color={m.color} />}
             </div>
@@ -1937,6 +2467,20 @@ function IconPicker({ icons, value, onChange }) {
 function PointsPicker({ value, onChange }) {
   return (
     <div className="field"><div className="label">Puntaje al completar</div><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{[1,2,3,4,5,6,7,8,9,10].map(n => (<button key={n} type="button" onClick={() => onChange(n)} className={`points-picker-btn ${value === n ? 'selected' : ''}`}>{n}</button>))}</div><div style={{ fontSize: '11px', color: '#8A7560', marginTop: '6px', fontStyle: 'italic' }}>Más puntos para tareas más importantes.</div></div>
+  );
+}
+
+function TimeOfDayPicker({ value, onChange, label = 'Momento del día' }) {
+  return (
+    <div className="field">
+      <div className="label">{label}</div>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <button type="button" className={`time-pill ${value === 'morning' ? 'selected' : ''}`} onClick={() => onChange('morning')}><Sunrise size={14} /> Mañana</button>
+        <button type="button" className={`time-pill ${value === 'afternoon' ? 'selected' : ''}`} onClick={() => onChange('afternoon')}><Sun size={14} /> Tarde</button>
+        <button type="button" className={`time-pill ${value === 'evening' ? 'selected' : ''}`} onClick={() => onChange('evening')}><Moon size={14} /> Noche</button>
+        <button type="button" className={`time-pill ${value === 'any' ? 'selected' : ''}`} onClick={() => onChange('any')}>Cualquier momento</button>
+      </div>
+    </div>
   );
 }
 
@@ -1975,16 +2519,22 @@ function RecurrencePicker({ recurrence, onChange }) {
 }
 
 function TaskModal({ data, family, onSave, onDelete, onClose }) {
-  const firstKey = Object.keys(family)[0];
+  const allKeys = Object.keys(family);
+  const initialWhoIds = Array.isArray(data?.whoIds) ? data.whoIds : (data?.who ? [data.who] : (allKeys[0] ? [allKeys[0]] : []));
   const [text, setText] = useState(data?.text || '');
-  const [who, setWho] = useState(data?.who || firstKey);
+  const [whoIds, setWhoIds] = useState(initialWhoIds);
   const [time, setTime] = useState(data?.time || '');
   const [recurrence, setRecurrence] = useState(data?.recurrence || { type: 'daily', startDate: todayKey() });
-  const handleSave = () => { if (text.trim()) onSave({ id: data?.id, text, who, time: time || null, recurrence }); };
+
+  const handleSave = () => {
+    if (!text.trim()) return;
+    if (whoIds.length === 0) { alert('Asigná la tarea a al menos un miembro.'); return; }
+    onSave({ id: data?.id, text, whoIds, time: time || null, recurrence });
+  };
   return (
     <ModalShell title={data ? 'Editar tarea' : 'Nueva tarea'} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
       <div className="field"><div className="label">Tarea</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ej: Comprar verduras" autoFocus /></div>
-      <PersonPicker family={family} value={who} onChange={setWho} />
+      <MultiPersonPicker family={family} allowedKeys={allKeys} values={whoIds} onChange={setWhoIds} label="Asignar a" />
       <div className="field"><div className="label">Hora (opcional)</div><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></div>
       <RecurrencePicker recurrence={recurrence} onChange={setRecurrence} />
     </ModalShell>
@@ -2044,6 +2594,7 @@ function RoutineModal({ data, member, memberData, family, kidKeys, onSave, onDel
   const [icon, setIcon] = useState(data?.icon || (isYoung ? '👕' : '🛏️'));
   const [points, setPoints] = useState(data?.points || 1);
   const [whoIds, setWhoIds] = useState(initialWhoIds);
+  const [timeOfDay, setTimeOfDay] = useState(data?.timeOfDay || 'any');
   const [recurrence, setRecurrence] = useState(data?.recurrence || { type: 'daily', startDate: todayKey() });
 
   const handleSave = () => {
@@ -2055,8 +2606,9 @@ function RoutineModal({ data, member, memberData, family, kidKeys, onSave, onDel
       ...base,
       icon,
       points,
+      timeOfDay,
       recurrence,
-      whoIds, // siempre guardamos whoIds; el handler decide si va a individual o shared
+      whoIds,
     };
     onSave(payload);
   };
@@ -2066,7 +2618,8 @@ function RoutineModal({ data, member, memberData, family, kidKeys, onSave, onDel
       <div className="field"><div className="label">{isYoung ? 'Etiqueta' : 'Paso'}</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} autoFocus /></div>
       <IconPicker icons={['👕','🥣','🪥','💆','🧴','🧥','🛏️','🥐','🎒','🎸','👟','📚','🚿','🧦','🍎','🎨','📝','🚽','🧼','🪑','🍽️','🍴','📖','⏰','✏️','📓','🧺','📵','💧','⚽','😴','📅','🌻','🍳','🗑️','💬']} value={icon} onChange={setIcon} />
       <PointsPicker value={points} onChange={setPoints} />
-      <MultiPersonPicker family={family} kidKeys={kidKeys} values={whoIds} onChange={setWhoIds} label="Asignar a (hijos)" />
+      <TimeOfDayPicker value={timeOfDay} onChange={setTimeOfDay} />
+      <MultiPersonPicker family={family} allowedKeys={kidKeys} values={whoIds} onChange={setWhoIds} label="Asignar a (hijos)" />
       <RecurrencePicker recurrence={recurrence} onChange={setRecurrence} />
     </ModalShell>
   );
@@ -2074,7 +2627,7 @@ function RoutineModal({ data, member, memberData, family, kidKeys, onSave, onDel
 
 function RoutineTemplatesModal({ member, memberData, family, kidKeys, onApply, onClose, onCreateBlank }) {
   const isYoung = memberData?.young;
-  const groupKey = isYoung ? 'young' : (member && family[member]?.young ? 'young' : 'kid'); // default
+  const groupKey = isYoung ? 'young' : 'kid';
   const [tab, setTab] = useState(groupKey);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [targetIds, setTargetIds] = useState([member]);
@@ -2109,16 +2662,22 @@ function RoutineTemplatesModal({ member, memberData, family, kidKeys, onApply, o
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '20px' }}>
-          {(ROUTINE_TEMPLATES[tab] || []).map(tpl => (
-            <button key={tpl.id} className={`template-card ${selectedTemplate?.id === tpl.id ? 'selected' : ''}`} onClick={() => setSelectedTemplate(tpl)}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                <div style={{ fontSize: '24px' }}>{tpl.icon}</div>
-                <div className="serif" style={{ fontSize: '15px', fontWeight: 700 }}>{tpl.name}</div>
-              </div>
-              <div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>{tpl.description}</div>
-              <div style={{ fontSize: '11px', color: '#A67C12', fontWeight: 600 }}>{tpl.steps.length} pasos</div>
-            </button>
-          ))}
+          {(ROUTINE_TEMPLATES[tab] || []).map(tpl => {
+            const tod = getTimeOfDayInfo(tpl.timeOfDay);
+            return (
+              <button key={tpl.id} className={`template-card ${selectedTemplate?.id === tpl.id ? 'selected' : ''}`} onClick={() => setSelectedTemplate(tpl)}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ fontSize: '24px' }}>{tpl.icon}</div>
+                  <div className="serif" style={{ fontSize: '15px', fontWeight: 700 }}>{tpl.name}</div>
+                </div>
+                <div style={{ fontSize: '12px', color: '#8A7560', marginBottom: '8px' }}>{tpl.description}</div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11px', color: '#A67C12', fontWeight: 600 }}>{tpl.steps.length} pasos</span>
+                  {tpl.timeOfDay && tpl.timeOfDay !== 'any' && <span className="recurrence-badge">{tod.emoji} {tod.label}</span>}
+                </div>
+              </button>
+            );
+          })}
         </div>
 
         {selectedTemplate && (
@@ -2132,7 +2691,7 @@ function RoutineTemplatesModal({ member, memberData, family, kidKeys, onApply, o
               </div>
             ))}
             <div style={{ marginTop: '14px' }}>
-              <MultiPersonPicker family={family} kidKeys={kidKeys} values={targetIds} onChange={setTargetIds} label="Aplicar a" />
+              <MultiPersonPicker family={family} allowedKeys={kidKeys} values={targetIds} onChange={setTargetIds} label="Aplicar a" />
             </div>
           </div>
         )}

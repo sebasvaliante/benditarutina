@@ -1,42 +1,23 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, ChevronLeft, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award, Cloud, CloudOff, Copy, Share2, KeyRound, Wifi, PawPrint, Wand2, UtensilsCrossed, PieChart, Sun, Moon, Sunrise } from 'lucide-react';
+import { Calendar, CheckSquare, ListTodo, Sparkles, Home, Plus, Check, Trophy, Briefcase, Clock, DollarSign, Star, X, Trash2, Edit2, Repeat, History as HistoryIcon, Lock, Eye, RotateCcw, ChevronRight, ChevronLeft, Users, Baby, HeartHandshake, Settings as SettingsIcon, Award, Cloud, CloudOff, Copy, Share2, KeyRound, Wifi, PawPrint, Wand2, UtensilsCrossed, PieChart, Sun, Moon, Sunrise, LayoutGrid, Table, Gift, Flame, Crown } from 'lucide-react';
 import {
   DAYS_ES, DAYS_FULL, MONTHS, MONTHS_SHORT, PALETTE, DEFAULT_BONUS_PCT,
   PET_TYPES, getPetEmoji, getPetTypeLabel, ROUTINE_TEMPLATES,
   TIME_OF_DAY, getTimeOfDayInfo, getCurrentTimeOfDay,
   MEAL_CATALOG, MEAL_BALANCE_CATEGORIES, mealBalanceCategories, getMealById,
+  REWARD_SUGGESTIONS, REWARD_ICONS,
   dateKey, parseKey, daysBetween, appliesOn, recurrenceLabel, todayKey,
+  getMondayOf, getSundayOf, isInWeekRange, isInMonthRange, formatWeekRange,
   loadState, saveState, verifyAdminPin, updateAdminPin, setInitialAdminPin,
   buildFamilyFromOnboarding, generateMemberId, getUsedColors,
   getLocation, fetchWeather, weatherCodeToInfo,
   formatMoney, formatTime, formatDate,
   FAMILY_CODE_KEY, getStoredFamilyPin, setStoredFamilyPin,
   normalizeFamilyData,
+  updateStreakForKid, getLiveStreak,
+  itemAppliesTo, itemMembers, isSharedItem, getRoutineTimeOfDay,
 } from './lib.js';
 import { generateFamilyCode, subscribeFamilyData, saveFamilyData, checkFamilyCodeExists } from './firebase.js';
-
-// ============================================================================
-// HELPERS para estructuras compartidas (rutinas y tareas)
-// ============================================================================
-// Una rutina/tarea puede tener:
-//   - who: string  (formato viejo, individual)
-//   - whoIds: array (formato nuevo, individual o compartida si len > 1)
-
-const itemAppliesTo = (item, memberId) => {
-  if (Array.isArray(item.whoIds)) return item.whoIds.includes(memberId);
-  return item.who === memberId;
-};
-
-const itemMembers = (item) => {
-  if (Array.isArray(item.whoIds)) return item.whoIds;
-  if (item.who) return [item.who];
-  return [];
-};
-
-const isSharedItem = (item) => Array.isArray(item.whoIds) && item.whoIds.length > 1;
-
-// Para rutinas: el timeOfDay default es 'any'
-const getRoutineTimeOfDay = (r) => r.timeOfDay || 'any';
 
 export default function App() {
   const [familyCode, setFamilyCode] = useState(() => loadState(FAMILY_CODE_KEY, null));
@@ -592,28 +573,20 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const meals = safeData.meals;
   const history = safeData.history;
   const jobInstances = safeData.jobInstances;
+  const rewards = safeData.rewards;
+  const rewardClaims = safeData.rewardClaims;
+  const streaks = safeData.streaks;
   const points = Object.keys(safeData.points).length > 0 ? safeData.points : (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
   const money = Object.keys(safeData.money).length > 0 ? safeData.money : (() => { const o = {}; kidKeys.forEach(k => o[k] = 0); return o; })();
 
   const saveToCloud = (updates) => {
     const newData = {
       config: familyConfig,
-      tasks, routines, bigJobs, events, lists, meals, points, money, history, jobInstances,
+      tasks, routines, bigJobs, events, lists, meals, points, money, history, jobInstances, rewards, rewardClaims, streaks,
       ...updates,
     };
     saveFamilyData(familyCode, newData);
   };
-
-  const setTasks = (v) => saveToCloud({ tasks: typeof v === 'function' ? v(tasks) : v });
-  const setRoutines = (v) => saveToCloud({ routines: typeof v === 'function' ? v(routines) : v });
-  const setBigJobs = (v) => saveToCloud({ bigJobs: typeof v === 'function' ? v(bigJobs) : v });
-  const setEvents = (v) => saveToCloud({ events: typeof v === 'function' ? v(events) : v });
-  const setLists = (v) => saveToCloud({ lists: typeof v === 'function' ? v(lists) : v });
-  const setMeals = (v) => saveToCloud({ meals: typeof v === 'function' ? v(meals) : v });
-  const setPoints = (v) => saveToCloud({ points: typeof v === 'function' ? v(points) : v });
-  const setMoney = (v) => saveToCloud({ money: typeof v === 'function' ? v(money) : v });
-  const setHistory = (v) => saveToCloud({ history: typeof v === 'function' ? v(history) : v });
-  const setJobInstances = (v) => saveToCloud({ jobInstances: typeof v === 'function' ? v(jobInstances) : v });
 
   const setFamilyConfig = (newConfig) => {
     saveToCloud({ config: newConfig });
@@ -621,9 +594,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
 
   useEffect(() => {
     const stored = getStoredFamilyPin(familyCode);
-    if (stored) {
-      setInitialAdminPin(stored);
-    }
+    if (stored) setInitialAdminPin(stored);
   }, [familyCode]);
 
   const [activeUser, setActiveUser] = useState(() => {
@@ -644,7 +615,9 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const [weather, setWeather] = useState(null);
   const [location, setLocation] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [tableViewMode, setTableViewMode] = useState(() => loadState('tableViewMode', 'cards')); // 'cards' | 'table'
 
+  useEffect(() => saveState('tableViewMode', tableViewMode), [tableViewMode]);
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 60000); return () => clearInterval(t); }, []);
   useEffect(() => { getLocation().then(loc => { setLocation(loc); fetchWeather(loc.lat, loc.lon).then(setWeather); }); }, []);
 
@@ -652,15 +625,14 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
   const tk = todayKey();
   const today = new Date(); today.setHours(0,0,0,0);
 
-  // Tareas: pueden ser individuales o compartidas (whoIds)
-  // Para "todaysTasks" devolvemos cada tarea expandida por miembro al que aplica
+  // Tareas expandidas
   const todaysTasksRaw = tasks.filter(t => appliesOn(t, today));
   const expandTaskForMembers = (t) => {
     const members = itemMembers(t);
     if (members.length === 0) return [];
     return members.filter(m => family[m]).map(memberId => ({
       ...t,
-      _displayWho: memberId,  // a quién se le muestra
+      _displayWho: memberId,
       done: history.some(h => h.kind === 'task' && h.templateId === t.id && h.date === tk && h.who === memberId),
     }));
   };
@@ -668,7 +640,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
 
   const todaysEvents = events.filter(e => family[e.who] && appliesOn(e, today));
 
-  // Rutinas: routines[member] (individual) + routines.shared (compartida)
+  // Rutinas para un kid
   const todaysRoutinesFor = (kid) => {
     const direct = (routines[kid] || []);
     const shared = (routines.shared || []).filter(r => itemAppliesTo(r, kid));
@@ -679,17 +651,55 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     }));
   };
 
-  const todaysJobs = bigJobs.filter(j => {
-    if (!family[j.who]) return false;
+  // Lista plana de TODAS las rutinas que aplican hoy (para vista tabla)
+  const allTodaysRoutinesFlat = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    Object.keys(routines).forEach(memberKey => {
+      if (memberKey === 'shared') {
+        (routines.shared || []).forEach(r => {
+          if (!seen.has(r.id) && appliesOn(r, today)) {
+            seen.add(r.id);
+            out.push(r);
+          }
+        });
+      } else {
+        (routines[memberKey] || []).forEach(r => {
+          if (!seen.has(r.id) && appliesOn(r, today)) {
+            seen.add(r.id);
+            out.push(r);
+          }
+        });
+      }
+    });
+    return out;
+  }, [routines, history, tk]);
+
+  // Trabajos: pueden tener whoIds (compartidos)
+  const expandJobForMembers = (j) => {
+    const members = itemMembers(j);
+    if (members.length === 0) return [];
+    const isShared = isSharedItem(j);
+    return members.filter(m => family[m]).map(memberId => {
+      const inst = jobInstances.find(i => i.jobId === j.id && i.date === tk && (i.who === memberId || (!i.who && !isShared)));
+      return {
+        ...j,
+        _displayWho: memberId,
+        instance: inst,
+        status: inst?.status || 'pending',
+      };
+    });
+  };
+  const todaysJobsRaw = bigJobs.filter(j => {
+    const members = itemMembers(j);
+    if (members.length === 0) return false;
     const hasInstance = jobInstances.some(i => i.jobId === j.id && i.date === tk);
     return hasInstance || appliesOn(j, today);
-  }).map(j => {
-    const inst = jobInstances.find(i => i.jobId === j.id && i.date === tk);
-    return { ...j, instance: inst, status: inst?.status || 'pending' };
   });
+  const todaysJobsExpanded = todaysJobsRaw.flatMap(expandJobForMembers);
 
-  // Filtrado por vista. Para tareas, filtramos por _displayWho
   const filterTasksByView = (items) => viewFilter === 'all' ? items : items.filter(t => t._displayWho === viewFilter);
+  const filterJobsByView = (items) => viewFilter === 'all' ? items : items.filter(j => j._displayWho === viewFilter);
   const filterByView = (items, getWho) => viewFilter === 'all' ? items : items.filter(i => getWho(i) === viewFilter);
 
   const triggerConfetti = (x, y, color, intensity = 1) => {
@@ -711,7 +721,6 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     setTimeout(() => setBigCelebration(null), 2800);
   };
 
-  // Toggle de tarea: para una tarea compartida, cada persona tiene su propio "done"
   const toggleTask = (taskId, displayWho, e) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
@@ -725,6 +734,7 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     }
   };
 
+  // Toggle de rutina ahora actualiza puntos, bonus en historial, y streaks
   const toggleRoutine = (kid, itemId, e) => {
     const todays = todaysRoutinesFor(kid);
     const item = todays.find(r => r.id === itemId);
@@ -735,27 +745,44 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     const existing = history.find(h => h.kind === 'routine' && h.templateId === itemId && h.date === tk && h.who === kid);
 
     if (existing) {
+      // Destildar
       const wasAllDone = todays.every(r => r.done);
-      let toSubtract = itemPoints;
-      if (wasAllDone && dayBonus > 0) toSubtract += dayBonus;
-      saveToCloud({
+      let updates = {
         history: history.filter(h => h.id !== existing.id),
-        points: { ...points, [kid]: Math.max(0, (points[kid] || 0) - toSubtract) },
-      });
+        points: { ...points, [kid]: Math.max(0, (points[kid] || 0) - itemPoints) },
+      };
+      if (wasAllDone && dayBonus > 0) {
+        // Buscar y eliminar la entrada de bonus también
+        updates.history = updates.history.filter(h => !(h.kind === 'bonus' && h.who === kid && h.date === tk));
+        updates.points = { ...updates.points, [kid]: Math.max(0, (points[kid] || 0) - itemPoints - dayBonus) };
+      }
+      // Actualizar streak (ahora ya no está completo)
+      updates.streaks = updateStreakForKid(streaks, kid, false, tk);
+      saveToCloud(updates);
     } else {
+      // Tildar
       const rect = e.currentTarget.getBoundingClientRect();
       const willAllBeDone = todays.every(r => r.id === itemId || r.done);
       triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[kid].color);
       triggerPointsAnimation(rect.left + rect.width/2, rect.top + rect.height/2, kid, itemPoints);
-      let toAdd = itemPoints;
+      let newHistory = [...history, { id: Date.now(), kind: 'routine', templateId: itemId, date: tk, who: kid, points: itemPoints }];
+      let newPoints = { ...points, [kid]: (points[kid] || 0) + itemPoints };
+      let newStreaks = streaks;
+
       if (willAllBeDone && dayBonus > 0) {
-        toAdd += dayBonus;
+        newHistory.push({ id: Date.now() + 1, kind: 'bonus', date: tk, who: kid, points: dayBonus, title: 'Bonus por completar el día' });
+        newPoints = { ...newPoints, [kid]: newPoints[kid] + dayBonus };
         triggerBigCelebration(family[kid].name, family[kid].color, `¡Rutina completa! +${dayBonus} bonus`);
+        newStreaks = updateStreakForKid(streaks, kid, true, tk);
+        // Mensaje extra si subió racha
+        const oldS = getLiveStreak(streaks, kid);
+        const newS = newStreaks[kid] || { current: 0, best: 0 };
+        if (newS.current > oldS.current && newS.current > 1) {
+          setTimeout(() => triggerBigCelebration(family[kid].name, family[kid].color, `🔥 Racha de ${newS.current} días`), 1200);
+        }
       }
-      saveToCloud({
-        history: [...history, { id: Date.now(), kind: 'routine', templateId: itemId, date: tk, who: kid, points: itemPoints }],
-        points: { ...points, [kid]: (points[kid] || 0) + toAdd },
-      });
+
+      saveToCloud({ history: newHistory, points: newPoints, streaks: newStreaks });
     }
   };
 
@@ -766,43 +793,120 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       const rect = e.currentTarget.getBoundingClientRect();
       triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, '#E8804F', 0.6);
     }
-    setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.map(i => i.id === itemId ? { ...i, done: !i.done } : i) } : l));
+    saveToCloud({ lists: lists.map(l => l.id === listId ? { ...l, items: l.items.map(i => i.id === itemId ? { ...i, done: !i.done } : i) } : l) });
   };
 
-  const submitJob = (jobId, e) => {
+  // Trabajos: marcar como hecho. Si es compartido, ya viene con _displayWho
+  const submitJob = (jobId, displayWho, e) => {
     const job = bigJobs.find(j => j.id === jobId);
+    if (!job) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[job.who].color, 0.8);
-    const existing = jobInstances.find(i => i.jobId === jobId && i.date === tk);
+    triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[displayWho]?.color || '#3D2E1F', 0.8);
+    const isShared = isSharedItem(job);
+    const existing = jobInstances.find(i => i.jobId === jobId && i.date === tk && (isShared ? i.who === displayWho : true));
     let newJobInstances;
-    if (existing) newJobInstances = jobInstances.map(i => i.id === existing.id ? { ...i, status: 'review' } : i);
-    else newJobInstances = [...jobInstances, { id: `j${jobId}-${tk}`, jobId, date: tk, status: 'review' }];
+    if (existing) {
+      newJobInstances = jobInstances.map(i => i.id === existing.id ? { ...i, status: 'review', who: displayWho } : i);
+    } else {
+      newJobInstances = [...jobInstances, { id: `j${jobId}-${tk}-${displayWho}`, jobId, date: tk, status: 'review', who: displayWho }];
+    }
     saveToCloud({ jobInstances: newJobInstances });
   };
 
-  const validateJob = (jobId, e) => {
+  const validateJob = (jobId, displayWho, e) => {
     if (!isAdmin) {
       const rect = e?.currentTarget?.getBoundingClientRect();
-      requestPin(() => actuallyValidateJob(jobId, rect));
+      requestPin(() => actuallyValidateJob(jobId, displayWho, rect));
       return;
     }
     const rect = e.currentTarget.getBoundingClientRect();
-    actuallyValidateJob(jobId, rect);
+    actuallyValidateJob(jobId, displayWho, rect);
   };
-  const actuallyValidateJob = (jobId, rect) => {
+  const actuallyValidateJob = (jobId, displayWho, rect) => {
     const job = bigJobs.find(j => j.id === jobId);
-    if (rect) triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[job.who].color, 1.5);
-    triggerBigCelebration(family[job.who].name, family[job.who].color, job.reward.type === 'money' ? `+${formatMoney(job.reward.value)}` : `+${job.reward.value} puntos`);
+    if (!job) return;
+    if (rect) triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[displayWho]?.color || '#3D2E1F', 1.5);
+    triggerBigCelebration(family[displayWho]?.name || '', family[displayWho]?.color || '#3D2E1F', job.reward.type === 'money' ? `+${formatMoney(job.reward.value)}` : `+${job.reward.value} puntos`);
+
+    const isShared = isSharedItem(job);
     const updates = {
-      jobInstances: jobInstances.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'done' } : i),
-      history: [...history, { id: Date.now(), kind: 'job', templateId: jobId, date: tk, who: job.who, title: job.title, ...(job.reward.type === 'points' ? { points: job.reward.value } : { money: job.reward.value })}],
+      jobInstances: jobInstances.map(i => (i.jobId === jobId && i.date === tk && (isShared ? i.who === displayWho : true)) ? { ...i, status: 'done' } : i),
+      history: [...history, { id: Date.now(), kind: 'job', templateId: jobId, date: tk, who: displayWho, title: job.title, ...(job.reward.type === 'points' ? { points: job.reward.value } : { money: job.reward.value })}],
     };
-    if (job.reward.type === 'points') updates.points = { ...points, [job.who]: (points[job.who] || 0) + job.reward.value };
-    else updates.money = { ...money, [job.who]: (money[job.who] || 0) + job.reward.value };
+    if (job.reward.type === 'points') updates.points = { ...points, [displayWho]: (points[displayWho] || 0) + job.reward.value };
+    else updates.money = { ...money, [displayWho]: (money[displayWho] || 0) + job.reward.value };
     saveToCloud(updates);
   };
-  const rejectJob = (jobId) => {
-    const apply = () => saveToCloud({ jobInstances: jobInstances.map(i => (i.jobId === jobId && i.date === tk) ? { ...i, status: 'pending' } : i) });
+  const rejectJob = (jobId, displayWho) => {
+    const apply = () => {
+      const isShared = bigJobs.find(j => j.id === jobId) && isSharedItem(bigJobs.find(j => j.id === jobId));
+      saveToCloud({ jobInstances: jobInstances.map(i => (i.jobId === jobId && i.date === tk && (isShared ? i.who === displayWho : true)) ? { ...i, status: 'pending' } : i) });
+    };
+    if (!isAdmin) requestPin(apply);
+    else apply();
+  };
+
+  // ============ PREMIOS ============
+  const saveReward = (data) => {
+    if (data.id) saveToCloud({ rewards: rewards.map(r => r.id === data.id ? { ...r, ...data } : r) });
+    else saveToCloud({ rewards: [...rewards, { ...data, id: Date.now() }] });
+    setModal(null);
+  };
+  const deleteReward = (id) => {
+    saveToCloud({ rewards: rewards.filter(r => r.id !== id) });
+    setModal(null);
+  };
+  const requestRewardClaim = (rewardId, kidId) => {
+    const reward = rewards.find(r => r.id === rewardId);
+    if (!reward) return;
+    const balance = reward.type === 'money' ? (money[kidId] || 0) : (points[kidId] || 0);
+    if (balance < reward.cost) {
+      alert(`A ${family[kidId].name} le faltan ${reward.cost - balance} ${reward.type === 'money' ? 'pesos' : 'puntos'} para canjear este premio.`);
+      return;
+    }
+    if (reward.stock !== undefined && reward.stock !== null && reward.stock <= 0) {
+      alert('Este premio no tiene stock disponible.');
+      return;
+    }
+    const claim = {
+      id: Date.now(),
+      rewardId,
+      who: kidId,
+      date: tk,
+      status: 'pending',
+      cost: reward.cost,
+      type: reward.type,
+      name: reward.name,
+      icon: reward.icon,
+    };
+    saveToCloud({ rewardClaims: [...rewardClaims, claim] });
+    triggerBigCelebration(family[kidId].name, family[kidId].color, 'Canje solicitado ✨');
+  };
+  const approveClaim = (claimId) => {
+    const apply = () => {
+      const claim = rewardClaims.find(c => c.id === claimId);
+      if (!claim) return;
+      const reward = rewards.find(r => r.id === claim.rewardId);
+      const updates = {
+        rewardClaims: rewardClaims.map(c => c.id === claimId ? { ...c, status: 'approved' } : c),
+        history: [...history, { id: Date.now(), kind: 'reward', templateId: claim.rewardId, date: tk, who: claim.who, title: claim.name, ...(claim.type === 'points' ? { points: -claim.cost } : { money: -claim.cost }) }],
+      };
+      if (claim.type === 'points') updates.points = { ...points, [claim.who]: Math.max(0, (points[claim.who] || 0) - claim.cost) };
+      else updates.money = { ...money, [claim.who]: Math.max(0, (money[claim.who] || 0) - claim.cost) };
+      // Stock --
+      if (reward && reward.stock !== undefined && reward.stock !== null) {
+        updates.rewards = rewards.map(r => r.id === claim.rewardId ? { ...r, stock: Math.max(0, r.stock - 1) } : r);
+      }
+      saveToCloud(updates);
+      triggerBigCelebration(family[claim.who]?.name || '', family[claim.who]?.color || '#3D2E1F', `🎁 ${claim.name}`);
+    };
+    if (!isAdmin) requestPin(apply);
+    else apply();
+  };
+  const rejectClaim = (claimId) => {
+    const apply = () => {
+      saveToCloud({ rewardClaims: rewardClaims.map(c => c.id === claimId ? { ...c, status: 'rejected' } : c) });
+    };
     if (!isAdmin) requestPin(apply);
     else apply();
   };
@@ -814,84 +918,85 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     else setActiveUser(userId);
   };
 
-  // ===== TAREAS =====
-  // Pueden ser individuales (who) o compartidas (whoIds con > 1)
+  // TAREAS
   const saveTask = (data) => {
     const isCompartida = Array.isArray(data.whoIds) && data.whoIds.length > 1;
     let payload;
-    if (isCompartida) {
-      payload = { ...data, whoIds: data.whoIds, who: undefined };
-    } else if (Array.isArray(data.whoIds) && data.whoIds.length === 1) {
-      payload = { ...data, who: data.whoIds[0], whoIds: undefined };
-    } else {
-      payload = data;
-    }
-    if (data.id) setTasks(tasks.map(t => t.id === data.id ? { ...t, ...payload } : t));
-    else setTasks([...tasks, { ...payload, id: Date.now() }]);
+    if (isCompartida) payload = { ...data, whoIds: data.whoIds, who: undefined };
+    else if (Array.isArray(data.whoIds) && data.whoIds.length === 1) payload = { ...data, who: data.whoIds[0], whoIds: undefined };
+    else payload = data;
+    if (data.id) saveToCloud({ tasks: tasks.map(t => t.id === data.id ? { ...t, ...payload } : t) });
+    else saveToCloud({ tasks: [...tasks, { ...payload, id: Date.now() }] });
     setModal(null);
   };
-  const deleteTask = (id) => { setTasks(tasks.filter(t => t.id !== id)); setModal(null); };
+  const deleteTask = (id) => { saveToCloud({ tasks: tasks.filter(t => t.id !== id) }); setModal(null); };
 
+  // TRABAJOS
   const saveJob = (data) => {
-    if (data.id) setBigJobs(bigJobs.map(j => j.id === data.id ? { ...j, ...data } : j));
-    else setBigJobs([...bigJobs, { ...data, id: Date.now() }]);
+    const isCompartida = Array.isArray(data.whoIds) && data.whoIds.length > 1;
+    let payload;
+    if (isCompartida) payload = { ...data, whoIds: data.whoIds, who: undefined };
+    else if (Array.isArray(data.whoIds) && data.whoIds.length === 1) payload = { ...data, who: data.whoIds[0], whoIds: undefined };
+    else payload = data;
+    if (data.id) saveToCloud({ bigJobs: bigJobs.map(j => j.id === data.id ? { ...j, ...payload } : j) });
+    else saveToCloud({ bigJobs: [...bigJobs, { ...payload, id: Date.now() }] });
     setModal(null);
   };
-  const deleteJob = (id) => { setBigJobs(bigJobs.filter(j => j.id !== id)); setModal(null); };
+  const deleteJob = (id) => { saveToCloud({ bigJobs: bigJobs.filter(j => j.id !== id) }); setModal(null); };
 
   const saveEvent = (data) => {
-    if (data.id) setEvents(events.map(e => e.id === data.id ? { ...e, ...data } : e));
-    else setEvents([...events, { ...data, id: Date.now() }]);
+    if (data.id) saveToCloud({ events: events.map(e => e.id === data.id ? { ...e, ...data } : e) });
+    else saveToCloud({ events: [...events, { ...data, id: Date.now() }] });
     setModal(null);
   };
-  const deleteEvent = (id) => { setEvents(events.filter(e => e.id !== id)); setModal(null); };
+  const deleteEvent = (id) => { saveToCloud({ events: events.filter(e => e.id !== id) }); setModal(null); };
 
-  // ===== RUTINAS =====
+  // RUTINAS
   const saveRoutineItem = (member, data) => {
     const isCompartida = Array.isArray(data.whoIds) && data.whoIds.length > 1;
     if (isCompartida) {
       const sharedList = routines.shared || [];
-      let newShared;
+      let newRoutines;
       if (data.id) {
         const existsInShared = sharedList.some(r => r.id === data.id);
         if (existsInShared) {
-          newShared = sharedList.map(r => r.id === data.id ? { ...r, ...data } : r);
-          setRoutines({ ...routines, shared: newShared });
+          newRoutines = { ...routines, shared: sharedList.map(r => r.id === data.id ? { ...r, ...data } : r) };
         } else {
           const newMemberRoutines = (routines[member] || []).filter(r => r.id !== data.id);
-          setRoutines({ ...routines, [member]: newMemberRoutines, shared: [...sharedList, { ...data }] });
+          newRoutines = { ...routines, [member]: newMemberRoutines, shared: [...sharedList, { ...data }] };
         }
       } else {
-        newShared = [...sharedList, { ...data, id: Date.now() }];
-        setRoutines({ ...routines, shared: newShared });
+        newRoutines = { ...routines, shared: [...sharedList, { ...data, id: Date.now() }] };
       }
+      saveToCloud({ routines: newRoutines });
     } else {
       const targetMember = (data.whoIds && data.whoIds[0]) || member;
       const sharedList = routines.shared || [];
       const existsInShared = data.id ? sharedList.some(r => r.id === data.id) : false;
+      let newRoutines;
       if (existsInShared) {
         const newShared = sharedList.filter(r => r.id !== data.id);
         const targetCurrent = routines[targetMember] || [];
-        setRoutines({ ...routines, shared: newShared, [targetMember]: [...targetCurrent, { ...data }] });
+        newRoutines = { ...routines, shared: newShared, [targetMember]: [...targetCurrent, { ...data }] };
       } else {
         const current = routines[targetMember] || [];
-        if (data.id) {
-          setRoutines({ ...routines, [targetMember]: current.map(r => r.id === data.id ? { ...r, ...data } : r) });
-        } else {
-          setRoutines({ ...routines, [targetMember]: [...current, { ...data, id: Date.now() }] });
-        }
+        if (data.id) newRoutines = { ...routines, [targetMember]: current.map(r => r.id === data.id ? { ...r, ...data } : r) };
+        else newRoutines = { ...routines, [targetMember]: [...current, { ...data, id: Date.now() }] };
       }
+      saveToCloud({ routines: newRoutines });
     }
     setModal(null);
   };
 
   const deleteRoutineItem = (member, id) => {
     const sharedList = routines.shared || [];
+    let newRoutines;
     if (sharedList.some(r => r.id === id)) {
-      setRoutines({ ...routines, shared: sharedList.filter(r => r.id !== id) });
+      newRoutines = { ...routines, shared: sharedList.filter(r => r.id !== id) };
     } else {
-      setRoutines({ ...routines, [member]: (routines[member] || []).filter(r => r.id !== id) });
+      newRoutines = { ...routines, [member]: (routines[member] || []).filter(r => r.id !== id) };
     }
+    saveToCloud({ routines: newRoutines });
     setModal(null);
   };
 
@@ -908,37 +1013,40 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       ...(isCompartida ? { whoIds: targetMemberIds } : {}),
     }));
 
+    let newRoutines;
     if (isCompartida) {
       const sharedList = routines.shared || [];
-      setRoutines({ ...routines, shared: [...sharedList, ...newItems] });
+      newRoutines = { ...routines, shared: [...sharedList, ...newItems] };
     } else {
       const targetMember = targetMemberIds[0];
       const current = routines[targetMember] || [];
-      setRoutines({ ...routines, [targetMember]: [...current, ...newItems] });
+      newRoutines = { ...routines, [targetMember]: [...current, ...newItems] };
     }
+    saveToCloud({ routines: newRoutines });
     setModal(null);
   };
 
-  // ===== LISTAS =====
+  // LISTAS
   const saveList = (data) => {
-    if (data.id) setLists(lists.map(l => l.id === data.id ? { ...l, name: data.name, icon: data.icon } : l));
-    else setLists([...lists, { ...data, id: Date.now(), items: [] }]);
+    if (data.id) saveToCloud({ lists: lists.map(l => l.id === data.id ? { ...l, name: data.name, icon: data.icon } : l) });
+    else saveToCloud({ lists: [...lists, { ...data, id: Date.now(), items: [] }] });
     setModal(null);
   };
-  const deleteList = (id) => { setLists(lists.filter(l => l.id !== id)); setModal(null); };
+  const deleteList = (id) => { saveToCloud({ lists: lists.filter(l => l.id !== id) }); setModal(null); };
   const saveListItem = (listId, itemData) => {
-    setLists(lists.map(l => {
-      if (l.id !== listId) return l;
-      if (itemData.id) return { ...l, items: l.items.map(i => i.id === itemData.id ? { ...i, ...itemData } : i) };
-      return { ...l, items: [...l.items, { ...itemData, id: Date.now(), done: false }] };
-    }));
+    saveToCloud({
+      lists: lists.map(l => {
+        if (l.id !== listId) return l;
+        if (itemData.id) return { ...l, items: l.items.map(i => i.id === itemData.id ? { ...i, ...itemData } : i) };
+        return { ...l, items: [...l.items, { ...itemData, id: Date.now(), done: false }] };
+      })
+    });
     setModal(null);
   };
-  const deleteListItem = (listId, itemId) => setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => i.id !== itemId) } : l));
-  const clearCompletedItems = (listId) => setLists(lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => !i.done) } : l));
+  const deleteListItem = (listId, itemId) => saveToCloud({ lists: lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => i.id !== itemId) } : l) });
+  const clearCompletedItems = (listId) => saveToCloud({ lists: lists.map(l => l.id === listId ? { ...l, items: l.items.filter(i => !i.done) } : l) });
 
-  // ===== MENÚ DE COMIDAS =====
-  // meals tiene esta forma: { 'YYYY-MM-DD': { lunch: {id, name, custom}, dinner: {...} } }
+  // MENÚ DE COMIDAS
   const setMealForDate = (dKey, slot, mealData) => {
     const newMeals = { ...meals };
     if (!newMeals[dKey]) newMeals[dKey] = {};
@@ -948,14 +1056,11 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     } else {
       newMeals[dKey] = { ...newMeals[dKey], [slot]: mealData };
     }
-    setMeals(newMeals);
+    saveToCloud({ meals: newMeals });
   };
+  const toggleMealBalance = () => setFamilyConfig({ ...familyConfig, showMealBalance: !showMealBalance });
 
-  const toggleMealBalance = () => {
-    setFamilyConfig({ ...familyConfig, showMealBalance: !showMealBalance });
-  };
-
-  // ===== CONFIG =====
+  // CONFIG
   const updateFamilyConfig = (newConfig) => {
     const allNewIds = [...newConfig.adults, ...newConfig.kids, ...newConfig.helpers, ...(newConfig.pets || [])].map(p => p.id);
     const newKidKeys = newConfig.kids.map(k => k.id);
@@ -971,11 +1076,9 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
         cleanedRoutines[k] = routines[k];
       }
     });
-    const cleanedPoints = {};
-    newKidKeys.forEach(k => { cleanedPoints[k] = points[k] || 0; });
-    const cleanedMoney = {};
-    newKidKeys.forEach(k => { cleanedMoney[k] = money[k] || 0; });
-    // Limpiar tareas: si tiene whoIds, filtrar miembros válidos; si sólo tiene who, validar
+    const cleanedPoints = {}; newKidKeys.forEach(k => { cleanedPoints[k] = points[k] || 0; });
+    const cleanedMoney = {};  newKidKeys.forEach(k => { cleanedMoney[k]  = money[k]  || 0; });
+    const cleanedStreaks = {}; newKidKeys.forEach(k => { cleanedStreaks[k] = streaks[k] || { current: 0, last: null, best: 0 }; });
     const cleanedTasks = tasks.map(t => {
       if (Array.isArray(t.whoIds)) {
         const valid = t.whoIds.filter(id => allNewIds.includes(id));
@@ -984,15 +1087,24 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       }
       return allNewIds.includes(t.who) ? t : null;
     }).filter(Boolean);
+    const cleanedJobs = bigJobs.map(j => {
+      if (Array.isArray(j.whoIds)) {
+        const valid = j.whoIds.filter(id => allNewIds.includes(id));
+        if (valid.length === 0) return null;
+        return { ...j, whoIds: valid, who: valid.length === 1 ? valid[0] : undefined };
+      }
+      return allNewIds.includes(j.who) ? j : null;
+    }).filter(Boolean);
     saveToCloud({
       config: newConfig,
       tasks: cleanedTasks,
-      bigJobs: bigJobs.filter(j => allNewIds.includes(j.who)),
+      bigJobs: cleanedJobs,
       events: events.filter(e => allNewIds.includes(e.who)),
       history: history.filter(h => allNewIds.includes(h.who)),
       routines: cleanedRoutines,
       points: cleanedPoints,
       money: cleanedMoney,
+      streaks: cleanedStreaks,
     });
     if (!allNewIds.includes(activeUser) || family[activeUser]?.role === 'pet') {
       setActiveUser(newConfig.adults[0]?.id || allNewIds[0]);
@@ -1003,6 +1115,9 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
 
   const peopleEntries = Object.entries(family).filter(([k, m]) => m.role !== 'pet');
   const petEntries = Object.entries(family).filter(([k, m]) => m.role === 'pet');
+
+  // Pendientes de canje (para badge en pestaña premios)
+  const pendingClaims = rewardClaims.filter(c => c.status === 'pending').length;
 
   return (
     <div style={{ fontFamily: '"DM Sans", -apple-system, sans-serif', background: '#FDFAF3', minHeight: '100vh', color: '#3D2E1F', position: 'relative', overflowX: 'hidden' }}>
@@ -1072,14 +1187,15 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
         </div>
 
         <div className="main-content">
-          {activeTab === 'today'    && <TodayView family={family} kidKeys={kidKeys} events={filterByView(todaysEvents, e => e.who)} tasks={filterTasksByView(todaysTasksExpanded)} points={points} toggleTask={toggleTask} />}
+          {activeTab === 'today'    && <TodayView family={family} kidKeys={kidKeys} events={filterByView(todaysEvents, e => e.who)} tasks={filterTasksByView(todaysTasksExpanded)} points={points} streaks={streaks} toggleTask={toggleTask} />}
           {activeTab === 'calendar' && <CalendarView family={family} events={filterByView(events, e => e.who)} isAdmin={isAdmin} setModal={setModal} />}
-          {activeTab === 'tasks'    && <TasksView family={family} tasks={filterTasksByView(todaysTasksExpanded)} toggleTask={toggleTask} isAdmin={isAdmin} setModal={setModal} />}
-          {activeTab === 'routines' && <RoutinesView family={family} normalKidKeys={normalKidKeys} youngKidKeys={youngKidKeys} kidKeys={kidKeys} routines={routines} todaysRoutinesFor={todaysRoutinesFor} toggleRoutine={toggleRoutine} points={points} isAdmin={isAdmin} setModal={setModal} viewFilter={viewFilter} />}
-          {activeTab === 'jobs'     && <JobsView family={family} kidKeys={kidKeys} bigJobs={bigJobs} todaysJobs={filterByView(todaysJobs, j => j.who)} submitJob={submitJob} validateJob={validateJob} rejectJob={rejectJob} money={money} points={points} isAdmin={isAdmin} setModal={setModal} />}
+          {activeTab === 'tasks'    && <TasksView family={family} tasksExpanded={filterTasksByView(todaysTasksExpanded)} tasksRaw={todaysTasksRaw} toggleTask={toggleTask} isAdmin={isAdmin} setModal={setModal} viewMode={tableViewMode} setViewMode={setTableViewMode} viewFilter={viewFilter} />}
+          {activeTab === 'routines' && <RoutinesView family={family} normalKidKeys={normalKidKeys} youngKidKeys={youngKidKeys} kidKeys={kidKeys} routines={routines} todaysRoutinesFor={todaysRoutinesFor} allTodaysRoutinesFlat={allTodaysRoutinesFlat} toggleRoutine={toggleRoutine} points={points} streaks={streaks} isAdmin={isAdmin} setModal={setModal} viewFilter={viewFilter} viewMode={tableViewMode} setViewMode={setTableViewMode} history={history} tk={tk} />}
+          {activeTab === 'jobs'     && <JobsView family={family} kidKeys={kidKeys} bigJobs={bigJobs} todaysJobsExpanded={filterJobsByView(todaysJobsExpanded)} todaysJobsRaw={todaysJobsRaw} submitJob={submitJob} validateJob={validateJob} rejectJob={rejectJob} money={money} points={points} isAdmin={isAdmin} setModal={setModal} viewMode={tableViewMode} setViewMode={setTableViewMode} viewFilter={viewFilter} />}
           {activeTab === 'meals'    && <MealsView meals={meals} setMealForDate={setMealForDate} showBalance={showMealBalance} toggleBalance={toggleMealBalance} familySize={familyConfig.adults.length + familyConfig.kids.length} isAdmin={isAdmin} />}
+          {activeTab === 'rewards'  && <RewardsView family={family} kidKeys={kidKeys} rewards={rewards} rewardClaims={rewardClaims} points={points} money={money} isAdmin={isAdmin} setModal={setModal} requestRewardClaim={requestRewardClaim} approveClaim={approveClaim} rejectClaim={rejectClaim} />}
           {activeTab === 'lists'    && <ListsView lists={lists} toggleListItem={toggleListItem} deleteListItem={deleteListItem} clearCompletedItems={clearCompletedItems} isAdmin={isAdmin} setModal={setModal} />}
-          {activeTab === 'history'  && <HistoryView family={family} kidKeys={kidKeys} history={history} tasks={tasks} bigJobs={bigJobs} routines={routines} viewFilter={viewFilter} />}
+          {activeTab === 'history'  && <HistoryView family={family} kidKeys={kidKeys} history={history} tasks={tasks} bigJobs={bigJobs} routines={routines} rewards={rewards} streaks={streaks} viewFilter={viewFilter} />}
         </div>
       </div>
 
@@ -1090,14 +1206,17 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
           { id: 'tasks', label: 'Tareas', icon: CheckSquare },
           { id: 'routines', label: 'Rutinas', icon: Sparkles },
           { id: 'jobs', label: 'Trabajos', icon: Briefcase },
+          { id: 'rewards', label: 'Premios', icon: Gift, badge: pendingClaims },
           { id: 'meals', label: 'Menú', icon: UtensilsCrossed },
           { id: 'lists', label: 'Listas', icon: ListTodo },
           { id: 'history', label: 'Historial', icon: HistoryIcon },
         ].map(tab => {
           const Icon = tab.icon;
           return (
-            <button key={tab.id} className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
-              <Icon size={18} /><span>{tab.label}</span>
+            <button key={tab.id} className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)} style={{ position: 'relative' }}>
+              <Icon size={18} />
+              <span>{tab.label}</span>
+              {tab.badge > 0 && <span style={{ position: 'absolute', top: '4px', right: '6px', background: '#C0392B', color: 'white', fontSize: '9px', fontWeight: 700, minWidth: '14px', height: '14px', borderRadius: '999px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{tab.badge}</span>}
             </button>
           );
         })}
@@ -1110,7 +1229,10 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
       {modal && modal.type === 'routineTemplates' && <RoutineTemplatesModal member={modal.member} memberData={family[modal.member]} family={family} kidKeys={kidKeys} onApply={applyTemplate} onClose={() => setModal(null)} onCreateBlank={() => setModal({ type: 'routine', member: modal.member, data: null })} />}
       {modal && modal.type === 'list' && <ListModal data={modal.data} onSave={saveList} onDelete={deleteList} onClose={() => setModal(null)} />}
       {modal && modal.type === 'listItem' && <ListItemModal data={modal.data} listId={modal.listId} onSave={(d) => saveListItem(modal.listId, d)} onClose={() => setModal(null)} />}
-      {modal && modal.type === 'mealPicker' && <MealPickerModal initialDate={modal.dateKey} initialSlot={modal.slot} initialMeal={modal.meal} onSelect={(dKey, slot, meal) => setMealForDate(dKey, slot, meal)} onClose={() => setModal(null)} />}
+      {modal && modal.type === 'mealPicker' && <MealPickerModal dateKey={modal.dateKey} slot={modal.slot} currentMeal={modal.meal} onSelect={(meal) => { setMealForDate(modal.dateKey, modal.slot, meal); setModal(null); }} onClear={() => { setMealForDate(modal.dateKey, modal.slot, null); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal && modal.type === 'reward' && <RewardModal data={modal.data} onSave={saveReward} onDelete={deleteReward} onClose={() => setModal(null)} />}
+      {modal && modal.type === 'whoClaims' && <WhoClaimsModal family={family} kidKeys={kidKeys} reward={modal.reward} points={points} money={money} onPick={(kidId) => { requestRewardClaim(modal.reward.id, kidId); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal && modal.type === 'whoSubmitsJob' && <WhoSubmitsJobModal family={family} job={modal.job} onPick={(memberId) => { submitJob(modal.job.id, memberId, modal.event); setModal(null); }} onClose={() => setModal(null)} />}
       {pinPrompt && <PinPrompt onSuccess={() => { pinPrompt.onSuccess(); setPinPrompt(null); }} onCancel={() => setPinPrompt(null)} />}
       {showSettings && <SettingsModal config={familyConfig} familyCode={familyCode} onUpdate={updateFamilyConfig} onClose={() => setShowSettings(false)} onResetFamily={onResetFamily} />}
     </div>
@@ -1169,6 +1291,22 @@ function MainStyles() {
       .shared-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: #5C7D42; background: #EDF4E2; padding: 2px 7px; border-radius: 999px; font-weight: 600; }
       .time-pill { padding: 8px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600; border: 1.5px solid #E8DEC9; background: white; color: #3D2E1F; display: inline-flex; align-items: center; gap: 6px; }
       .time-pill.selected { background: #3D2E1F; color: white; border-color: #3D2E1F; }
+      .view-toggle-btn { padding: 8px 12px; border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 600; border: 1.5px solid #E8DEC9; background: white; color: #3D2E1F; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
+      .view-toggle-btn.selected { background: #3D2E1F; color: white; border-color: #3D2E1F; }
+      .table-cell-circle { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.18s ease; font-weight: 700; font-family: 'Fraunces', serif; font-size: 14px; user-select: none; flex-shrink: 0; }
+      .table-cell-circle.pending { border: 2.5px solid; background: white; color: var(--clr); }
+      .table-cell-circle.done { background: var(--clr); color: white; transform: scale(1.06); border: 2.5px solid var(--clr); }
+      .table-cell-circle:hover { transform: scale(1.12); }
+      .table-cell-empty { color: #D4C5B0; font-size: 18px; font-weight: 300; user-select: none; }
+      .data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+      .data-table thead th { font-size: 11px; color: #8A7560; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 8px; border-bottom: 1.5px solid #F5EFE6; text-align: center; }
+      .data-table thead th.first-col { text-align: left; padding-left: 4px; }
+      .data-table tbody td { padding: 10px 8px; border-bottom: 1px solid #F5EFE6; vertical-align: middle; }
+      .data-table tbody td.first-col { padding-left: 4px; max-width: 320px; }
+      .data-table tbody td.cell { text-align: center; }
+      .data-table tbody tr:last-child td { border-bottom: none; }
+      .streak-chip { display: inline-flex; align-items: center; gap: 3px; background: linear-gradient(135deg, #FFE8C7 0%, #FFD49B 100%); color: #6B4F18; font-weight: 700; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-family: 'Fraunces', serif; }
+      .crown-chip { display: inline-flex; align-items: center; gap: 3px; background: linear-gradient(135deg, #FFEFAA 0%, #FFD45A 100%); color: #6B4F18; font-weight: 700; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-family: 'Fraunces', serif; box-shadow: 0 1px 3px rgba(255,180,0,0.3); }
       @keyframes confettiFly { 0% { transform: translate(0,0) rotate(0deg); opacity: 1; } 100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); opacity: 0; } }
       @keyframes pointsRise { 0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; } 15% { transform: translate(-50%, -10px) scale(1.3); opacity: 1; } 100% { transform: translate(-50%, -90px) scale(1); opacity: 0; } }
       @keyframes bigPop { 0% { transform: translate(-50%,-50%) scale(0.3); opacity: 0; } 15% { transform: translate(-50%,-50%) scale(1.15); opacity: 1; } 25% { transform: translate(-50%,-50%) scale(1); opacity: 1; } 85% { transform: translate(-50%,-50%) scale(1); opacity: 1; } 100% { transform: translate(-50%,-50%) scale(0.9); opacity: 0; } }
@@ -1208,6 +1346,10 @@ function MainStyles() {
       .meal-slot.empty { background: transparent; border: 1px dashed #D4C5B0; color: #B8A78C; justify-content: center; }
       .meal-slot:hover { background: #F5EFE6; }
       .meal-slot.empty:hover { background: #FBF5E9; }
+      .reward-card { background: white; border-radius: 18px; padding: 18px; box-shadow: 0 1px 3px rgba(61,46,31,0.04); border: 2px solid transparent; transition: all 0.15s; cursor: pointer; }
+      .reward-card.affordable { border-color: #7BA05B; }
+      .reward-card.expensive { opacity: 0.6; }
+      .reward-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(61,46,31,0.1); }
       .app-container { max-width: 1600px; margin: 0 auto; }
       .header-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 24px; padding: 20px 32px 16px; }
       .header-row > .header-left { justify-self: start; }
@@ -1223,15 +1365,15 @@ function MainStyles() {
       @media (max-width: 1280px) { .clock { font-size: 42px; } .logo-text, .logo-symbol { font-size: 22px; } .header-row { padding: 16px 24px 12px; gap: 16px; } .view-bar { padding: 0 24px 12px; } .main-content { padding: 0 24px 110px; } }
       @media (max-width: 1024px) { .clock { font-size: 38px; } .date-text { font-size: 14px; } .logo-text, .logo-symbol { font-size: 20px; } .header-row { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; align-items: start; gap: 12px; padding: 14px 20px 10px; } .header-row > .header-left { grid-column: 1; grid-row: 1; } .header-row > .header-right { grid-column: 2; grid-row: 1; } .header-row > .header-center { grid-column: 1 / -1; grid-row: 2; justify-self: center; padding: 0; margin-top: 4px; } .view-bar { padding: 0 20px 12px; } .main-content { padding: 0 20px 100px; } .tab-btn { padding: 8px 10px; font-size: 11px; min-width: 52px; } }
       @media (max-width: 900px) { .clock { font-size: 34px; } .header-row { grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 8px; padding: 12px 16px 8px; } .header-row > .header-left, .header-row > .header-right { grid-column: 1; justify-self: stretch; } .header-row > .header-center { grid-column: 1; grid-row: 1; justify-self: center; margin-bottom: 2px; } .header-row > .header-left { grid-row: 2; } .header-row > .header-right { grid-row: 3; display: flex !important; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; gap: 8px !important; } .view-bar { padding: 0 16px 10px; gap: 6px; } .main-content { padding: 0 16px 96px; } .card { padding: 18px; border-radius: 18px; } .tab-btn span { font-size: 10px; } }
-      @media (max-width: 500px) { .clock { font-size: 30px; } .date-text { font-size: 13px; } .logo-text, .logo-symbol { font-size: 18px; } .header-row { padding: 10px 12px 6px; } .view-bar { padding: 0 12px 8px; gap: 5px; } .view-bar .pill { padding: 5px 10px !important; font-size: 11px; } .main-content { padding: 0 12px 90px; } .card { padding: 14px; border-radius: 16px; } .bottom-nav { padding: 8px 4px; gap: 0; } .tab-btn { padding: 6px 2px; min-width: 0; flex: 1; } .tab-btn span { font-size: 9px; } .modal-box { padding: 20px; border-radius: 18px; } .pin-input { width: 160px; height: 60px; font-size: 26px; } .user-switcher button { width: 32px; height: 32px; font-size: 12px; } .avatar { width: 32px; height: 32px; font-size: 13px; } }
+      @media (max-width: 500px) { .clock { font-size: 30px; } .date-text { font-size: 13px; } .logo-text, .logo-symbol { font-size: 18px; } .header-row { padding: 10px 12px 6px; } .view-bar { padding: 0 12px 8px; gap: 5px; } .view-bar .pill { padding: 5px 10px !important; font-size: 11px; } .main-content { padding: 0 12px 90px; } .card { padding: 14px; border-radius: 16px; } .bottom-nav { padding: 8px 4px; gap: 0; } .tab-btn { padding: 6px 2px; min-width: 0; flex: 1; } .tab-btn span { font-size: 9px; } .modal-box { padding: 20px; border-radius: 18px; } .pin-input { width: 160px; height: 60px; font-size: 26px; } .user-switcher button { width: 32px; height: 32px; font-size: 12px; } .avatar { width: 32px; height: 32px; font-size: 13px; } .table-cell-circle { width: 32px; height: 32px; font-size: 12px; } }
     `}</style>
   );
 }
 // ============================================================================
-// VIEWS
+// VIEWS: Today, Calendar
 // ============================================================================
 
-function TodayView({ family, kidKeys, events, tasks, points, toggleTask }) {
+function TodayView({ family, kidKeys, events, tasks, points, streaks, toggleTask }) {
   const pendingTasks = tasks.filter(t => !t.done).slice(0, 6);
   const ranking = kidKeys.map(k => ({ k, ...family[k], pts: points[k] || 0 })).sort((a,b) => b.pts - a.pts);
   return (
@@ -1260,14 +1402,20 @@ function TodayView({ family, kidKeys, events, tasks, points, toggleTask }) {
               <Trophy size={20} color="#F5B645" />
               <div className="serif" style={{ fontSize: '20px', fontWeight: 600 }}>Ranking del mes</div>
             </div>
-            {ranking.map((r, i) => (
-              <div key={r.k} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0' }}>
-                <div style={{ fontSize: '20px', width: '24px' }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '·'}</div>
-                <div className="avatar" style={{ background: r.color, width: '28px', height: '28px', fontSize: '12px' }}>{r.initial}</div>
-                <div style={{ flex: 1, fontWeight: 500, fontSize: '14px' }}>{r.name}</div>
-                <div className="serif" style={{ fontSize: '18px', fontWeight: 700, color: r.color }}>{r.pts}</div>
-              </div>
-            ))}
+            {ranking.map((r, i) => {
+              const live = getLiveStreak(streaks, r.k);
+              return (
+                <div key={r.k} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0' }}>
+                  <div style={{ fontSize: '20px', width: '24px' }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '·'}</div>
+                  <div className="avatar" style={{ background: r.color, width: '28px', height: '28px', fontSize: '12px' }}>{r.initial}</div>
+                  <div style={{ flex: 1, fontWeight: 500, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {r.name}
+                    {live.current > 0 && <span className="streak-chip"><Flame size={10} /> {live.current}</span>}
+                  </div>
+                  <div className="serif" style={{ fontSize: '18px', fontWeight: 700, color: r.color }}>{r.pts}</div>
+                </div>
+              );
+            })}
           </div>
         )}
         <div className="card">
@@ -1327,41 +1475,157 @@ function CalendarView({ family, events, isAdmin, setModal }) {
   );
 }
 
-function TasksView({ family, tasks, toggleTask, isAdmin, setModal }) {
+// ============================================================================
+// COMPONENTES REUTILIZABLES (toggle + tabla)
+// ============================================================================
+
+function ViewModeToggle({ value, onChange }) {
   return (
-    <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-        <div className="serif" style={{ fontSize: '28px', fontWeight: 600 }}>Tareas de hoy</div>
-        {isAdmin && <button className="btn-primary" onClick={() => setModal({ type: 'task', data: null })}><Plus size={16} /> Nueva tarea</button>}
-      </div>
-      {tasks.length === 0 && <div style={{ color: '#8A7560', padding: '12px 0' }}>Sin tareas para hoy.</div>}
-      {tasks.map(t => (
-        <div key={`${t.id}-${t._displayWho}`} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 0', borderBottom: '1px solid #F5EFE6', opacity: t.done ? 0.5 : 1 }}>
-          <div onClick={(e) => toggleTask(t.id, t._displayWho, e)} className={`checkbox ${t.done ? 'done' : ''}`} style={{ cursor: 'pointer' }}>{t.done && <Check size={16} color="#FDFAF3" strokeWidth={3} />}</div>
-          <div style={{ flex: 1, cursor: 'pointer', minWidth: 0 }} onClick={(e) => toggleTask(t.id, t._displayWho, e)}>
-            <div style={{ fontSize: '14px', fontWeight: 500, textDecoration: t.done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</div>
-            <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
-              {t.time && <div style={{ fontSize: '11px', color: '#8A7560' }}>⏰ {t.time}</div>}
-              <div className="recurrence-badge"><Repeat size={10} />{recurrenceLabel(t.recurrence)}</div>
-              {isSharedItem(t) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
-            </div>
-          </div>
-          <div className="avatar" style={{ background: family[t._displayWho]?.color || '#999' }}>
-            {family[t._displayWho]?.role === 'pet' ? family[t._displayWho].emoji : family[t._displayWho]?.initial}
-          </div>
-          {isAdmin && <button onClick={() => setModal({ type: 'task', data: t })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#8A7560' }}><Edit2 size={16} /></button>}
-        </div>
-      ))}
+    <div style={{ display: 'flex', gap: '6px', background: '#FBF5E9', padding: '4px', borderRadius: '12px' }}>
+      <button className={`view-toggle-btn ${value === 'cards' ? 'selected' : ''}`} onClick={() => onChange('cards')}>
+        <LayoutGrid size={14} /> Tarjetas
+      </button>
+      <button className={`view-toggle-btn ${value === 'table' ? 'selected' : ''}`} onClick={() => onChange('table')}>
+        <Table size={14} /> Tabla
+      </button>
     </div>
   );
 }
 
-function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, todaysRoutinesFor, toggleRoutine, points, isAdmin, setModal, viewFilter }) {
+// Celda de la tabla: si la persona tiene el ítem asignado → círculo del color con la inicial
+// Si no le aplica → vacío.
+function TableCell({ memberId, family, item, done, onToggle }) {
+  if (!itemAppliesTo(item, memberId)) {
+    return <td className="cell"><span className="table-cell-empty">—</span></td>;
+  }
+  const m = family[memberId];
+  if (!m) return <td className="cell"><span className="table-cell-empty">—</span></td>;
+  return (
+    <td className="cell">
+      <div
+        className={`table-cell-circle ${done ? 'done' : 'pending'}`}
+        style={{ '--clr': m.color, margin: '0 auto' }}
+        onClick={onToggle}
+        title={`${m.name}: ${done ? 'hecho' : 'pendiente'}`}
+      >
+        {done ? <Check size={18} strokeWidth={3} /> : (m.role === 'pet' ? m.emoji : m.initial)}
+      </div>
+    </td>
+  );
+}
+
+// ============================================================================
+// TASKS VIEW (con vista tabla)
+// ============================================================================
+
+function TasksView({ family, tasksExpanded, tasksRaw, toggleTask, isAdmin, setModal, viewMode, setViewMode, viewFilter }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="serif" style={{ fontSize: '28px', fontWeight: 600 }}>Tareas de hoy</div>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          {isAdmin && <button className="btn-primary" onClick={() => setModal({ type: 'task', data: null })}><Plus size={16} /> Nueva tarea</button>}
+        </div>
+      </div>
+
+      {viewMode === 'cards' ? (
+        <div className="card">
+          {tasksExpanded.length === 0 && <div style={{ color: '#8A7560', padding: '12px 0' }}>Sin tareas para hoy.</div>}
+          {tasksExpanded.map(t => (
+            <div key={`${t.id}-${t._displayWho}`} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 0', borderBottom: '1px solid #F5EFE6', opacity: t.done ? 0.5 : 1 }}>
+              <div onClick={(e) => toggleTask(t.id, t._displayWho, e)} className={`checkbox ${t.done ? 'done' : ''}`} style={{ cursor: 'pointer' }}>{t.done && <Check size={16} color="#FDFAF3" strokeWidth={3} />}</div>
+              <div style={{ flex: 1, cursor: 'pointer', minWidth: 0 }} onClick={(e) => toggleTask(t.id, t._displayWho, e)}>
+                <div style={{ fontSize: '14px', fontWeight: 500, textDecoration: t.done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</div>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+                  {t.time && <div style={{ fontSize: '11px', color: '#8A7560' }}>⏰ {t.time}</div>}
+                  <div className="recurrence-badge"><Repeat size={10} />{recurrenceLabel(t.recurrence)}</div>
+                  {isSharedItem(t) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
+                </div>
+              </div>
+              <div className="avatar" style={{ background: family[t._displayWho]?.color || '#999' }}>
+                {family[t._displayWho]?.role === 'pet' ? family[t._displayWho].emoji : family[t._displayWho]?.initial}
+              </div>
+              {isAdmin && <button onClick={() => setModal({ type: 'task', data: t })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#8A7560' }}><Edit2 size={16} /></button>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <TaskTable family={family} tasksRaw={tasksRaw} tasksExpanded={tasksExpanded} toggleTask={toggleTask} isAdmin={isAdmin} setModal={setModal} viewFilter={viewFilter} />
+      )}
+    </div>
+  );
+}
+
+function TaskTable({ family, tasksRaw, tasksExpanded, toggleTask, isAdmin, setModal, viewFilter }) {
+  // Columnas según viewFilter
+  const allMemberKeys = Object.keys(family);
+  const columns = viewFilter === 'all' ? allMemberKeys : [viewFilter];
+
+  // Cada fila es una tarea (raw, no expandida)
+  const isDone = (taskId, memberId) => tasksExpanded.some(t => t.id === taskId && t._displayWho === memberId && t.done);
+
+  if (tasksRaw.length === 0) {
+    return <div className="card"><div style={{ color: '#8A7560', padding: '12px 0' }}>Sin tareas para hoy.</div></div>;
+  }
+
+  return (
+    <div className="card" style={{ overflowX: 'auto' }}>
+      <table className="data-table" style={{ minWidth: `${320 + columns.length * 80}px` }}>
+        <thead>
+          <tr>
+            <th className="first-col">Tarea</th>
+            {columns.map(k => {
+              const m = family[k];
+              return (
+                <th key={k}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                    <div className="avatar" style={{ background: m.color, width: '30px', height: '30px', fontSize: '13px' }}>
+                      {m.role === 'pet' ? m.emoji : m.initial}
+                    </div>
+                    <div style={{ fontSize: '11px', fontWeight: 600 }}>{m.name}</div>
+                  </div>
+                </th>
+              );
+            })}
+            {isAdmin && <th></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {tasksRaw.map(t => (
+            <tr key={t.id}>
+              <td className="first-col">
+                <div style={{ fontSize: '13px', fontWeight: 500, marginBottom: '3px' }}>{t.text}</div>
+                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                  {t.time && <span style={{ fontSize: '10px', color: '#8A7560' }}>⏰ {t.time}</span>}
+                  {isSharedItem(t) && <span className="shared-badge"><Users size={8} /> Compartida</span>}
+                </div>
+              </td>
+              {columns.map(memberId => (
+                <TableCell key={memberId} memberId={memberId} family={family} item={t} done={isDone(t.id, memberId)} onToggle={(e) => toggleTask(t.id, memberId, e)} />
+              ))}
+              {isAdmin && (
+                <td className="cell" style={{ width: '40px' }}>
+                  <button onClick={() => setModal({ type: 'task', data: t })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#8A7560' }}><Edit2 size={14} /></button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ============================================================================
+// ROUTINES VIEW (con tabla y rachas)
+// ============================================================================
+
+function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, todaysRoutinesFor, allTodaysRoutinesFlat, toggleRoutine, points, streaks, isAdmin, setModal, viewFilter, viewMode, setViewMode, history, tk }) {
   const ranking = kidKeys.map(k => ({ k, ...family[k], pts: points[k] || 0 })).sort((a,b) => b.pts - a.pts);
   const visibleNormal = viewFilter === 'all' ? normalKidKeys : (normalKidKeys.includes(viewFilter) ? [viewFilter] : []);
   const visibleYoung = viewFilter === 'all' ? youngKidKeys : (youngKidKeys.includes(viewFilter) ? [viewFilter] : []);
 
-  // Filtro por momento del día. Default: el momento actual.
   const [timeFilter, setTimeFilter] = useState(() => getCurrentTimeOfDay());
 
   const filterByTime = (items) => {
@@ -1375,20 +1639,22 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
   const TimeFilterBar = () => (
     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px', alignItems: 'center' }}>
       <span style={{ fontSize: '12px', color: '#8A7560', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '4px' }}>Momento:</span>
-      <button className={`time-pill ${timeFilter === 'morning' ? 'selected' : ''}`} onClick={() => setTimeFilter('morning')}>
-        <Sunrise size={14} /> Mañana
-      </button>
-      <button className={`time-pill ${timeFilter === 'afternoon' ? 'selected' : ''}`} onClick={() => setTimeFilter('afternoon')}>
-        <Sun size={14} /> Tarde
-      </button>
-      <button className={`time-pill ${timeFilter === 'evening' ? 'selected' : ''}`} onClick={() => setTimeFilter('evening')}>
-        <Moon size={14} /> Noche
-      </button>
-      <button className={`time-pill ${timeFilter === 'all' ? 'selected' : ''}`} onClick={() => setTimeFilter('all')}>
-        Todo el día
-      </button>
+      <button className={`time-pill ${timeFilter === 'morning' ? 'selected' : ''}`} onClick={() => setTimeFilter('morning')}><Sunrise size={14} /> Mañana</button>
+      <button className={`time-pill ${timeFilter === 'afternoon' ? 'selected' : ''}`} onClick={() => setTimeFilter('afternoon')}><Sun size={14} /> Tarde</button>
+      <button className={`time-pill ${timeFilter === 'evening' ? 'selected' : ''}`} onClick={() => setTimeFilter('evening')}><Moon size={14} /> Noche</button>
+      <button className={`time-pill ${timeFilter === 'all' ? 'selected' : ''}`} onClick={() => setTimeFilter('all')}>Todo el día</button>
     </div>
   );
+
+  // Récord actual (best) más alto de la familia
+  const bestRecord = useMemo(() => {
+    let max = 0;
+    kidKeys.forEach(k => {
+      const b = streaks[k]?.best || 0;
+      if (b > max) max = b;
+    });
+    return max;
+  }, [kidKeys, streaks]);
 
   return (
     <div>
@@ -1402,6 +1668,7 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
             {ranking.slice(0, 3).map((r, idx) => {
               const heights = [120, 90, 70];
               const medals = ['🥇', '🥈', '🥉'];
+              const live = getLiveStreak(streaks, r.k);
               return (
                 <div key={r.k} style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '32px', marginBottom: '6px' }}>{medals[idx]}</div>
@@ -1409,6 +1676,7 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
                   <div className="serif" style={{ fontSize: '16px', fontWeight: 700 }}>{r.name}</div>
                   <div className="serif" style={{ fontSize: '28px', fontWeight: 700, color: r.color }}>{r.pts}</div>
                   <div style={{ fontSize: '10px', color: '#8A7560', marginBottom: '6px' }}>puntos</div>
+                  {live.current > 0 && <div style={{ marginBottom: '6px' }}><span className="streak-chip"><Flame size={11} /> {live.current} días</span></div>}
                   <div style={{ background: r.color, height: `${heights[idx]}px`, borderRadius: '10px 10px 0 0', opacity: 0.85 }}/>
                 </div>
               );
@@ -1417,125 +1685,250 @@ function RoutinesView({ family, normalKidKeys, youngKidKeys, kidKeys, routines, 
         </div>
       )}
 
-      <div className="serif" style={{ fontSize: '24px', fontWeight: 600, marginBottom: '12px' }}>Rutinas de hoy</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
+        <div className="serif" style={{ fontSize: '24px', fontWeight: 600 }}>Rutinas de hoy</div>
+        <ViewModeToggle value={viewMode} onChange={setViewMode} />
+      </div>
       <TimeFilterBar />
 
-      {visibleNormal.length === 0 && visibleYoung.length === 0 && <div style={{ color: '#8A7560' }}>Seleccioná un menor en el filtro de arriba.</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
-        {visibleNormal.map(kid => {
-          const m = family[kid];
-          const allR = todaysRoutinesFor(kid);
-          const r = filterByTime(allR);
-          const done = r.filter(i => i.done).length;
-          return (
-            <div key={kid} className="card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                <div className="avatar" style={{ background: m.color, width: '40px', height: '40px', fontSize: '16px' }}>{m.initial}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="serif" style={{ fontSize: '20px', fontWeight: 600 }}>{m.name}</div>
-                  <div style={{ fontSize: '12px', color: '#8A7560' }}>{done} de {r.length}{timeFilter !== 'all' && allR.length !== r.length ? ` (${allR.length} total)` : ''}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div className="serif" style={{ fontSize: '18px', fontWeight: 700, color: m.color }}>{points[kid] || 0}</div>
-                  <div style={{ fontSize: '10px', color: '#8A7560' }}>puntos</div>
-                </div>
-              </div>
-              <div style={{ height: '6px', background: '#F5EFE6', borderRadius: '3px', marginBottom: '14px', overflow: 'hidden' }}>
-                <div style={{ width: r.length ? `${(done / r.length) * 100}%` : '0%', height: '100%', background: m.color, transition: 'width 0.4s ease' }}/>
-              </div>
-              {r.length === 0 && (
-                <div style={{ fontSize: '12px', color: '#8A7560', textAlign: 'center', padding: '8px 0', fontStyle: 'italic' }}>
-                  {timeFilter === 'all' ? 'Sin rutinas hoy' : `Sin rutinas para ${getTimeOfDayInfo(timeFilter).label.toLowerCase()}`}
-                </div>
-              )}
-              {r.map(item => {
-                const tod = getRoutineTimeOfDay(item);
-                const todInfo = getTimeOfDayInfo(tod);
-                return (
-                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', marginBottom: '5px', borderRadius: '10px', background: item.done ? '#FBF5E9' : 'transparent' }}>
-                    <div onClick={(e) => toggleRoutine(kid, item.id, e)} style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, cursor: 'pointer', minWidth: 0 }}>
-                      <div style={{ fontSize: '22px' }}>{item.icon}</div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '13px', fontWeight: 500, textDecoration: item.done ? 'line-through' : 'none', opacity: item.done ? 0.5 : 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.text}</div>
-                        <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
-                          <div className="points-badge">{item.points || 1} pt{(item.points || 1) > 1 ? 's' : ''}</div>
-                          {tod !== 'any' && <div className="recurrence-badge">{todInfo.emoji} {todInfo.label}</div>}
-                          {isSharedItem(item) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
-                        </div>
+      {viewMode === 'table' ? (
+        <RoutineTable
+          family={family} kidKeys={kidKeys} allRoutines={filterByTime(allTodaysRoutinesFlat)}
+          history={history} tk={tk} toggleRoutine={toggleRoutine}
+          streaks={streaks} bestRecord={bestRecord} points={points}
+          isAdmin={isAdmin} setModal={setModal} viewFilter={viewFilter}
+        />
+      ) : (
+        <>
+          {visibleNormal.length === 0 && visibleYoung.length === 0 && <div style={{ color: '#8A7560' }}>Seleccioná un menor en el filtro de arriba.</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+            {visibleNormal.map(kid => {
+              const m = family[kid];
+              const allR = todaysRoutinesFor(kid);
+              const r = filterByTime(allR);
+              const done = r.filter(i => i.done).length;
+              const live = getLiveStreak(streaks, kid);
+              const hasRecord = (streaks[kid]?.best || 0) > 0 && (streaks[kid]?.best || 0) >= bestRecord;
+              return (
+                <div key={kid} className="card">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                    <div className="avatar" style={{ background: m.color, width: '40px', height: '40px', fontSize: '16px' }}>{m.initial}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="serif" style={{ fontSize: '20px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        {m.name}
+                        {live.current > 0 && <span className="streak-chip"><Flame size={11} /> {live.current}</span>}
+                        {hasRecord && <span className="crown-chip" title="Récord histórico"><Crown size={11} /> {streaks[kid].best}</span>}
                       </div>
-                      <div className={`checkbox ${item.done ? 'done' : ''}`} style={{ width: '22px', height: '22px' }}>{item.done && <Check size={13} color="#FDFAF3" strokeWidth={3} />}</div>
+                      <div style={{ fontSize: '12px', color: '#8A7560' }}>{done} de {r.length}{timeFilter !== 'all' && allR.length !== r.length ? ` (${allR.length} total)` : ''}</div>
                     </div>
-                    {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', color: '#8A7560' }}><Edit2 size={14} /></button>}
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="serif" style={{ fontSize: '18px', fontWeight: 700, color: m.color }}>{points[kid] || 0}</div>
+                      <div style={{ fontSize: '10px', color: '#8A7560' }}>puntos</div>
+                    </div>
                   </div>
-                );
-              })}
-              {isAdmin && (
-                <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-                  <button onClick={() => setModal({ type: 'routineTemplates', member: kid })} style={{ flex: 1, padding: '10px', background: '#FBF5E9', border: '1.5px solid #E8DEC9', borderRadius: '12px', color: '#3D2E1F', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                    <Wand2 size={14} /> Plantilla
-                  </button>
-                  <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ flex: 1, padding: '10px', background: 'transparent', border: '1.5px dashed #D4C5B0', borderRadius: '12px', color: '#8A7560', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                    <Plus size={14} /> Agregar
-                  </button>
+                  <div style={{ height: '6px', background: '#F5EFE6', borderRadius: '3px', marginBottom: '14px', overflow: 'hidden' }}>
+                    <div style={{ width: r.length ? `${(done / r.length) * 100}%` : '0%', height: '100%', background: m.color, transition: 'width 0.4s ease' }}/>
+                  </div>
+                  {r.length === 0 && (
+                    <div style={{ fontSize: '12px', color: '#8A7560', textAlign: 'center', padding: '8px 0', fontStyle: 'italic' }}>
+                      {timeFilter === 'all' ? 'Sin rutinas hoy' : `Sin rutinas para ${getTimeOfDayInfo(timeFilter).label.toLowerCase()}`}
+                    </div>
+                  )}
+                  {r.map(item => {
+                    const tod = getRoutineTimeOfDay(item);
+                    const todInfo = getTimeOfDayInfo(tod);
+                    return (
+                      <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', marginBottom: '5px', borderRadius: '10px', background: item.done ? '#FBF5E9' : 'transparent' }}>
+                        <div onClick={(e) => toggleRoutine(kid, item.id, e)} style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, cursor: 'pointer', minWidth: 0 }}>
+                          <div style={{ fontSize: '22px' }}>{item.icon}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '13px', fontWeight: 500, textDecoration: item.done ? 'line-through' : 'none', opacity: item.done ? 0.5 : 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.text}</div>
+                            <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                              <div className="points-badge">{item.points || 1} pt{(item.points || 1) > 1 ? 's' : ''}</div>
+                              {tod !== 'any' && <div className="recurrence-badge">{todInfo.emoji} {todInfo.label}</div>}
+                              {isSharedItem(item) && <div className="shared-badge"><Users size={9} /> Compartida</div>}
+                            </div>
+                          </div>
+                          <div className={`checkbox ${item.done ? 'done' : ''}`} style={{ width: '22px', height: '22px' }}>{item.done && <Check size={13} color="#FDFAF3" strokeWidth={3} />}</div>
+                        </div>
+                        {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', color: '#8A7560' }}><Edit2 size={14} /></button>}
+                      </div>
+                    );
+                  })}
+                  {isAdmin && (
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                      <button onClick={() => setModal({ type: 'routineTemplates', member: kid })} style={{ flex: 1, padding: '10px', background: '#FBF5E9', border: '1.5px solid #E8DEC9', borderRadius: '12px', color: '#3D2E1F', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                        <Wand2 size={14} /> Plantilla
+                      </button>
+                      <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ flex: 1, padding: '10px', background: 'transparent', border: '1.5px dashed #D4C5B0', borderRadius: '12px', color: '#8A7560', cursor: 'pointer', fontFamily: 'inherit', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                        <Plus size={14} /> Agregar
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
 
-        {visibleYoung.map(kid => {
-          const m = family[kid];
-          const allR = todaysRoutinesFor(kid);
-          const r = filterByTime(allR);
-          return (
-            <div key={kid} className="card" style={{ background: '#FFF8EE' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                <div className="avatar" style={{ background: m.color, width: '40px', height: '40px', fontSize: '16px' }}>{m.initial}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="serif" style={{ fontSize: '20px', fontWeight: 600 }}>{m.name}</div>
-                  <div style={{ fontSize: '12px', color: '#8A7560' }}>{r.filter(i => i.done).length} de {r.length}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div className="serif" style={{ fontSize: '18px', fontWeight: 700, color: m.color }}>{points[kid] || 0}</div>
-                  <div style={{ fontSize: '10px', color: '#8A7560' }}>puntos</div>
-                </div>
-              </div>
-              {r.length === 0 && (
-                <div style={{ fontSize: '12px', color: '#8A7560', textAlign: 'center', padding: '12px', fontStyle: 'italic' }}>
-                  {timeFilter === 'all' ? 'Sin rutinas hoy' : `Sin rutinas para ${getTimeOfDayInfo(timeFilter).label.toLowerCase()}`}
-                </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                {r.map(item => (
-                  <div key={item.id} style={{ position: 'relative' }}>
-                    <div onClick={(e) => toggleRoutine(kid, item.id, e)} style={{ aspectRatio: '1', background: item.done ? m.color : 'white', borderRadius: '18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: `2px solid ${item.done ? m.color : '#F5EFE6'}`, padding: '6px' }}>
-                      <div style={{ fontSize: '36px', marginBottom: '6px' }}>{item.icon}</div>
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: item.done ? 'white' : '#3D2E1F', textAlign: 'center' }}>{item.label || item.text}</div>
-                      <div style={{ fontSize: '9px', color: item.done ? 'rgba(255,255,255,0.8)' : '#A67C12', marginTop: '2px' }}>{item.points || 1} pt</div>
-                      {item.done && <Check size={16} color="white" strokeWidth={3} style={{ marginTop: '3px' }} />}
+            {visibleYoung.map(kid => {
+              const m = family[kid];
+              const allR = todaysRoutinesFor(kid);
+              const r = filterByTime(allR);
+              const live = getLiveStreak(streaks, kid);
+              const hasRecord = (streaks[kid]?.best || 0) > 0 && (streaks[kid]?.best || 0) >= bestRecord;
+              return (
+                <div key={kid} className="card" style={{ background: '#FFF8EE' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                    <div className="avatar" style={{ background: m.color, width: '40px', height: '40px', fontSize: '16px' }}>{m.initial}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="serif" style={{ fontSize: '20px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        {m.name}
+                        {live.current > 0 && <span className="streak-chip"><Flame size={11} /> {live.current}</span>}
+                        {hasRecord && <span className="crown-chip" title="Récord histórico"><Crown size={11} /> {streaks[kid].best}</span>}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#8A7560' }}>{r.filter(i => i.done).length} de {r.length}</div>
                     </div>
-                    {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ position: 'absolute', top: '6px', right: '6px', background: 'rgba(255,255,255,0.9)', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8A7560' }}><Edit2 size={11} /></button>}
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="serif" style={{ fontSize: '18px', fontWeight: 700, color: m.color }}>{points[kid] || 0}</div>
+                      <div style={{ fontSize: '10px', color: '#8A7560' }}>puntos</div>
+                    </div>
                   </div>
-                ))}
-                {isAdmin && (
-                  <button onClick={() => setModal({ type: 'routineTemplates', member: kid })} style={{ aspectRatio: '1', background: '#FBF5E9', border: '2px solid #E8DEC9', borderRadius: '18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#3D2E1F', fontFamily: 'inherit' }}>
-                    <Wand2 size={26} />
-                    <div style={{ fontSize: '11px', fontWeight: 600, marginTop: '4px' }}>Plantilla</div>
-                  </button>
-                )}
-                {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ aspectRatio: '1', background: 'transparent', border: '2px dashed #D4C5B0', borderRadius: '18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8A7560', fontFamily: 'inherit' }}><Plus size={26} /><div style={{ fontSize: '11px', fontWeight: 500, marginTop: '4px' }}>Agregar</div></button>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                  {r.length === 0 && (
+                    <div style={{ fontSize: '12px', color: '#8A7560', textAlign: 'center', padding: '12px', fontStyle: 'italic' }}>
+                      {timeFilter === 'all' ? 'Sin rutinas hoy' : `Sin rutinas para ${getTimeOfDayInfo(timeFilter).label.toLowerCase()}`}
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    {r.map(item => (
+                      <div key={item.id} style={{ position: 'relative' }}>
+                        <div onClick={(e) => toggleRoutine(kid, item.id, e)} style={{ aspectRatio: '1', background: item.done ? m.color : 'white', borderRadius: '18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: `2px solid ${item.done ? m.color : '#F5EFE6'}`, padding: '6px' }}>
+                          <div style={{ fontSize: '36px', marginBottom: '6px' }}>{item.icon}</div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: item.done ? 'white' : '#3D2E1F', textAlign: 'center' }}>{item.label || item.text}</div>
+                          <div style={{ fontSize: '9px', color: item.done ? 'rgba(255,255,255,0.8)' : '#A67C12', marginTop: '2px' }}>{item.points || 1} pt</div>
+                          {item.done && <Check size={16} color="white" strokeWidth={3} style={{ marginTop: '3px' }} />}
+                        </div>
+                        {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: item })} style={{ position: 'absolute', top: '6px', right: '6px', background: 'rgba(255,255,255,0.9)', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8A7560' }}><Edit2 size={11} /></button>}
+                      </div>
+                    ))}
+                    {isAdmin && (
+                      <button onClick={() => setModal({ type: 'routineTemplates', member: kid })} style={{ aspectRatio: '1', background: '#FBF5E9', border: '2px solid #E8DEC9', borderRadius: '18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#3D2E1F', fontFamily: 'inherit' }}>
+                        <Wand2 size={26} />
+                        <div style={{ fontSize: '11px', fontWeight: 600, marginTop: '4px' }}>Plantilla</div>
+                      </button>
+                    )}
+                    {isAdmin && <button onClick={() => setModal({ type: 'routine', member: kid, data: null })} style={{ aspectRatio: '1', background: 'transparent', border: '2px dashed #D4C5B0', borderRadius: '18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8A7560', fontFamily: 'inherit' }}><Plus size={26} /><div style={{ fontSize: '11px', fontWeight: 500, marginTop: '4px' }}>Agregar</div></button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function JobsView({ family, kidKeys, bigJobs, todaysJobs, submitJob, validateJob, rejectJob, money, points, isAdmin, setModal }) {
-  const pending = todaysJobs.filter(j => j.status === 'pending');
-  const review = todaysJobs.filter(j => j.status === 'review');
+function RoutineTable({ family, kidKeys, allRoutines, history, tk, toggleRoutine, streaks, bestRecord, points, isAdmin, setModal, viewFilter }) {
+  const columns = viewFilter === 'all' ? kidKeys : (kidKeys.includes(viewFilter) ? [viewFilter] : kidKeys);
+
+  const isDone = (routineId, memberId) => history.some(h => h.kind === 'routine' && h.templateId === routineId && h.date === tk && h.who === memberId);
+
+  if (allRoutines.length === 0) {
+    return <div className="card"><div style={{ color: '#8A7560', padding: '12px 0' }}>Sin rutinas para mostrar.</div></div>;
+  }
+
+  return (
+    <div className="card" style={{ overflowX: 'auto' }}>
+      <table className="data-table" style={{ minWidth: `${320 + columns.length * 80}px` }}>
+        <thead>
+          <tr>
+            <th className="first-col">Rutina</th>
+            {columns.map(k => {
+              const m = family[k];
+              const live = getLiveStreak(streaks, k);
+              const hasRecord = (streaks[k]?.best || 0) > 0 && (streaks[k]?.best || 0) >= bestRecord && bestRecord > 0;
+              return (
+                <th key={k}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                    <div className="avatar" style={{ background: m.color, width: '34px', height: '34px', fontSize: '14px' }}>{m.initial}</div>
+                    <div style={{ fontSize: '11px', fontWeight: 600 }}>{m.name}</div>
+                    <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <span style={{ fontSize: '10px', color: '#8A7560', fontWeight: 600 }}>{points[k] || 0} pt</span>
+                      {live.current > 0 && <span className="streak-chip" style={{ fontSize: '9px', padding: '2px 6px' }}><Flame size={9} /> {live.current}</span>}
+                      {hasRecord && <span className="crown-chip" style={{ fontSize: '9px', padding: '2px 6px' }} title="Récord histórico"><Crown size={9} /> {streaks[k].best}</span>}
+                    </div>
+                  </div>
+                </th>
+              );
+            })}
+            {isAdmin && <th></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {allRoutines.map(r => {
+            const tod = getRoutineTimeOfDay(r);
+            const todInfo = getTimeOfDayInfo(tod);
+            return (
+              <tr key={r.id}>
+                <td className="first-col">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '20px' }}>{r.icon}</span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 500 }}>{r.text || r.label}</div>
+                      <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                        <span className="points-badge">{r.points || 1} pt</span>
+                        {tod !== 'any' && <span className="recurrence-badge">{todInfo.emoji} {todInfo.label}</span>}
+                        {isSharedItem(r) && <span className="shared-badge"><Users size={8} /> Compartida</span>}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                {columns.map(memberId => (
+                  <TableCell
+                    key={memberId}
+                    memberId={memberId}
+                    family={family}
+                    item={r}
+                    done={isDone(r.id, memberId)}
+                    onToggle={(e) => toggleRoutine(memberId, r.id, e)}
+                  />
+                ))}
+                {isAdmin && (
+                  <td className="cell" style={{ width: '40px' }}>
+                    <button onClick={() => {
+                      // determinar miembro "owner": si es shared, pasamos el primero; si no, el dueño
+                      const members = itemMembers(r);
+                      const owner = members[0] || kidKeys[0];
+                      setModal({ type: 'routine', member: owner, data: r });
+                    }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#8A7560' }}><Edit2 size={14} /></button>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+// ============================================================================
+// JOBS VIEW (con tabla + compartidos)
+// ============================================================================
+
+function JobsView({ family, kidKeys, bigJobs, todaysJobsExpanded, todaysJobsRaw, submitJob, validateJob, rejectJob, money, points, isAdmin, setModal, viewMode, setViewMode, viewFilter }) {
+  const pending = todaysJobsExpanded.filter(j => j.status === 'pending');
+  const review = todaysJobsExpanded.filter(j => j.status === 'review');
+
+  const onPendingClick = (job, e) => {
+    if (isSharedItem(job)) {
+      // Selector entre miembros asignados
+      e.persist?.();
+      const evt = e;
+      setModal({ type: 'whoSubmitsJob', job, event: evt });
+    } else {
+      submitJob(job.id, job._displayWho, e);
+    }
+  };
+
   return (
     <div>
       {kidKeys.length > 0 && (
@@ -1560,7 +1953,10 @@ function JobsView({ family, kidKeys, bigJobs, todaysJobs, submitJob, validateJob
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
         <div className="serif" style={{ fontSize: '28px', fontWeight: 600 }}>Trabajos de hoy</div>
-        {isAdmin && <button className="btn-primary" onClick={() => setModal({ type: 'job', data: null })}><Plus size={16} /> Nuevo trabajo</button>}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          {isAdmin && <button className="btn-primary" onClick={() => setModal({ type: 'job', data: null })}><Plus size={16} /> Nuevo trabajo</button>}
+        </div>
       </div>
 
       {review.length > 0 && (
@@ -1571,57 +1967,325 @@ function JobsView({ family, kidKeys, bigJobs, todaysJobs, submitJob, validateJob
             <Lock size={14} color="#8A7560" style={{ marginLeft: 'auto' }} />
             <span style={{ fontSize: '11px', color: '#8A7560' }}>Requiere PIN</span>
           </div>
-          {review.map(j => (
-            <div key={j.id} style={{ background: 'white', borderRadius: '12px', padding: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '28px' }}>{j.icon}</div>
-              <div style={{ flex: 1, minWidth: '140px' }}>
-                <div style={{ fontWeight: 600, fontSize: '14px' }}>{j.title}</div>
-                <div style={{ fontSize: '11px', color: '#8A7560' }}>{family[j.who]?.name} marcó como hecho</div>
-              </div>
-              <div className="serif" style={{ fontSize: '16px', fontWeight: 700, color: j.reward.type === 'money' ? '#7BA05B' : '#F5B645' }}>
-                {j.reward.type === 'money' ? formatMoney(j.reward.value) : `${j.reward.value} pts`}
-              </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button className="btn-ghost" onClick={() => rejectJob(j.id)}>Rechazar</button>
-                <button className="btn-success" onClick={(e) => validateJob(j.id, e)}><Check size={14} /> Aprobar</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="card">
-        <div className="serif" style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>Asignados ({pending.length})</div>
-        {pending.length === 0 && <div style={{ color: '#8A7560', padding: '12px 0' }}>No hay trabajos pendientes hoy.</div>}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
-          {pending.map(j => {
-            const m = family[j.who];
-            if (!m) return null;
+          {review.map(j => {
+            const m = family[j._displayWho];
             return (
-              <div key={j.id} style={{ background: '#FBF5E9', borderRadius: '14px', padding: '14px', borderLeft: `4px solid ${m.color}`, position: 'relative' }}>
-                {isAdmin && <button onClick={() => setModal({ type: 'job', data: j })} style={{ position: 'absolute', top: '10px', right: '10px', background: 'white', border: 'none', borderRadius: '8px', padding: '5px', cursor: 'pointer', color: '#8A7560' }}><Edit2 size={13} /></button>}
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
-                  <div style={{ fontSize: '28px' }}>{j.icon}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '3px' }}>{j.title}</div>
-                    <div style={{ fontSize: '11px', color: '#8A7560' }}>{m.name} · {j.deadline}</div>
+              <div key={`${j.id}-${j._displayWho}`} style={{ background: 'white', borderRadius: '12px', padding: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '28px' }}>{j.icon}</div>
+                <div style={{ flex: 1, minWidth: '140px' }}>
+                  <div style={{ fontWeight: 600, fontSize: '14px' }}>{j.title}</div>
+                  <div style={{ fontSize: '11px', color: '#8A7560', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                    <div className="avatar" style={{ background: m?.color, width: '18px', height: '18px', fontSize: '9px' }}>{m?.initial}</div>
+                    {m?.name} marcó como hecho
                   </div>
                 </div>
-                {j.notes && <div style={{ fontSize: '12px', color: '#8A7560', fontStyle: 'italic', marginBottom: '10px', padding: '6px 8px', background: 'white', borderRadius: '6px' }}>"{j.notes}"</div>}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '13px', color: j.reward.type === 'money' ? '#5C7D42' : '#A67C12' }}>
-                    {j.reward.type === 'money' ? formatMoney(j.reward.value) : `${j.reward.value} pts`}
-                  </div>
-                  <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={(e) => submitJob(j.id, e)}>Marcar hecho</button>
+                <div className="serif" style={{ fontSize: '16px', fontWeight: 700, color: j.reward.type === 'money' ? '#7BA05B' : '#F5B645' }}>
+                  {j.reward.type === 'money' ? formatMoney(j.reward.value) : `${j.reward.value} pts`}
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button className="btn-ghost" onClick={() => rejectJob(j.id, j._displayWho)}>Rechazar</button>
+                  <button className="btn-success" onClick={(e) => validateJob(j.id, j._displayWho, e)}><Check size={14} /> Aprobar</button>
                 </div>
               </div>
             );
           })}
         </div>
-      </div>
+      )}
+
+      {viewMode === 'cards' ? (
+        <div className="card">
+          <div className="serif" style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>Asignados ({pending.length})</div>
+          {pending.length === 0 && <div style={{ color: '#8A7560', padding: '12px 0' }}>No hay trabajos pendientes hoy.</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
+            {pending.map(j => {
+              const m = family[j._displayWho];
+              if (!m) return null;
+              return (
+                <div key={`${j.id}-${j._displayWho}`} style={{ background: '#FBF5E9', borderRadius: '14px', padding: '14px', borderLeft: `4px solid ${m.color}`, position: 'relative' }}>
+                  {isAdmin && <button onClick={() => setModal({ type: 'job', data: j })} style={{ position: 'absolute', top: '10px', right: '10px', background: 'white', border: 'none', borderRadius: '8px', padding: '5px', cursor: 'pointer', color: '#8A7560' }}><Edit2 size={13} /></button>}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
+                    <div style={{ fontSize: '28px' }}>{j.icon}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '3px' }}>{j.title}</div>
+                      <div style={{ fontSize: '11px', color: '#8A7560', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        {m.name} · {j.deadline}
+                        {isSharedItem(j) && <span className="shared-badge"><Users size={9} /> Compartida</span>}
+                      </div>
+                    </div>
+                  </div>
+                  {j.notes && <div style={{ fontSize: '12px', color: '#8A7560', fontStyle: 'italic', marginBottom: '10px', padding: '6px 8px', background: 'white', borderRadius: '6px' }}>"{j.notes}"</div>}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: j.reward.type === 'money' ? '#5C7D42' : '#A67C12' }}>
+                      {j.reward.type === 'money' ? formatMoney(j.reward.value) : `${j.reward.value} pts`}
+                    </div>
+                    <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={(e) => submitJob(j.id, j._displayWho, e)}>Marcar hecho</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <JobTable
+          family={family} kidKeys={kidKeys}
+          jobsRaw={todaysJobsRaw} jobsExpanded={todaysJobsExpanded}
+          submitJob={submitJob} setModal={setModal}
+          isAdmin={isAdmin} viewFilter={viewFilter}
+        />
+      )}
     </div>
   );
 }
+
+function JobTable({ family, kidKeys, jobsRaw, jobsExpanded, submitJob, setModal, isAdmin, viewFilter }) {
+  const allMemberKeys = Object.keys(family);
+  const columns = viewFilter === 'all' ? allMemberKeys : [viewFilter];
+
+  // Estado de un trabajo para un miembro: 'pending' | 'review' | 'done' | null si no aplica
+  const statusFor = (jobId, memberId) => {
+    const exp = jobsExpanded.find(j => j.id === jobId && j._displayWho === memberId);
+    return exp ? exp.status : null;
+  };
+
+  if (jobsRaw.length === 0) {
+    return <div className="card"><div style={{ color: '#8A7560', padding: '12px 0' }}>No hay trabajos para hoy.</div></div>;
+  }
+
+  return (
+    <div className="card" style={{ overflowX: 'auto' }}>
+      <table className="data-table" style={{ minWidth: `${320 + columns.length * 90}px` }}>
+        <thead>
+          <tr>
+            <th className="first-col">Trabajo</th>
+            {columns.map(k => {
+              const m = family[k];
+              return (
+                <th key={k}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                    <div className="avatar" style={{ background: m.color, width: '30px', height: '30px', fontSize: '13px' }}>
+                      {m.role === 'pet' ? m.emoji : m.initial}
+                    </div>
+                    <div style={{ fontSize: '11px', fontWeight: 600 }}>{m.name}</div>
+                  </div>
+                </th>
+              );
+            })}
+            {isAdmin && <th></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {jobsRaw.map(j => (
+            <tr key={j.id}>
+              <td className="first-col">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '20px' }}>{j.icon}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 500 }}>{j.title}</div>
+                    <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                      <span className="points-badge" style={{ background: j.reward.type === 'money' ? '#EDF4E2' : '#FFF4E0', color: j.reward.type === 'money' ? '#3D5C26' : '#A67C12' }}>
+                        {j.reward.type === 'money' ? formatMoney(j.reward.value) : `${j.reward.value} pt`}
+                      </span>
+                      {isSharedItem(j) && <span className="shared-badge"><Users size={8} /> Compartida</span>}
+                    </div>
+                  </div>
+                </div>
+              </td>
+              {columns.map(memberId => {
+                const status = statusFor(j.id, memberId);
+                if (!itemAppliesTo(j, memberId)) {
+                  return <td key={memberId} className="cell"><span className="table-cell-empty">—</span></td>;
+                }
+                const m = family[memberId];
+                return (
+                  <td key={memberId} className="cell">
+                    {status === 'done' && (
+                      <div className="table-cell-circle done" style={{ '--clr': '#7BA05B', margin: '0 auto', background: '#7BA05B', borderColor: '#7BA05B' }} title="Aprobado">
+                        <Check size={18} strokeWidth={3} />
+                      </div>
+                    )}
+                    {status === 'review' && (
+                      <div className="table-cell-circle done" style={{ '--clr': '#F5B645', margin: '0 auto', background: '#F5B645', borderColor: '#F5B645' }} title="En revisión">
+                        <Clock size={16} strokeWidth={3} />
+                      </div>
+                    )}
+                    {status === 'pending' && (
+                      <div
+                        className="table-cell-circle pending"
+                        style={{ '--clr': m.color, margin: '0 auto' }}
+                        onClick={(e) => submitJob(j.id, memberId, e)}
+                        title={`${m.name}: marcar hecho`}
+                      >
+                        {m.role === 'pet' ? m.emoji : m.initial}
+                      </div>
+                    )}
+                  </td>
+                );
+              })}
+              {isAdmin && (
+                <td className="cell" style={{ width: '40px' }}>
+                  <button onClick={() => setModal({ type: 'job', data: j })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#8A7560' }}><Edit2 size={14} /></button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ============================================================================
+// REWARDS VIEW (premios)
+// ============================================================================
+
+function RewardsView({ family, kidKeys, rewards, rewardClaims, points, money, isAdmin, setModal, requestRewardClaim, approveClaim, rejectClaim }) {
+  const pendingClaims = rewardClaims.filter(c => c.status === 'pending').sort((a,b) => b.id - a.id);
+  const recentApproved = rewardClaims.filter(c => c.status === 'approved').sort((a,b) => b.id - a.id).slice(0, 5);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="serif" style={{ fontSize: '28px', fontWeight: 600 }}>Premios</div>
+        {isAdmin && <button className="btn-primary" onClick={() => setModal({ type: 'reward', data: null })}><Plus size={16} /> Nuevo premio</button>}
+      </div>
+
+      {kidKeys.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '20px' }}>
+          {kidKeys.map(k => {
+            const m = family[k];
+            return (
+              <div key={k} className="card" style={{ background: `linear-gradient(135deg, ${m.color}15 0%, ${m.color}30 100%)`, padding: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div className="avatar" style={{ background: m.color, width: '32px', height: '32px', fontSize: '13px' }}>{m.initial}</div>
+                  <div className="serif" style={{ fontSize: '16px', fontWeight: 600 }}>{m.name}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <div><div style={{ fontSize: '10px', color: '#8A7560', fontWeight: 600 }}>PUNTOS</div><div className="serif" style={{ fontSize: '20px', fontWeight: 700, color: m.color }}>{points[k] || 0}</div></div>
+                  <div><div style={{ fontSize: '10px', color: '#8A7560', fontWeight: 600 }}>DINERO</div><div className="serif" style={{ fontSize: '20px', fontWeight: 700 }}>{formatMoney(money[k] || 0)}</div></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {pendingClaims.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px', background: 'linear-gradient(135deg, #FFF4E0 0%, #FFE9C7 100%)', border: '2px solid #F5B645' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+            <Clock size={20} color="#E8804F" />
+            <div className="serif" style={{ fontSize: '18px', fontWeight: 600 }}>Canjes esperando aprobación ({pendingClaims.length})</div>
+            <Lock size={14} color="#8A7560" style={{ marginLeft: 'auto' }} />
+            <span style={{ fontSize: '11px', color: '#8A7560' }}>Requiere PIN</span>
+          </div>
+          {pendingClaims.map(c => {
+            const m = family[c.who];
+            const balance = c.type === 'money' ? (money[c.who] || 0) : (points[c.who] || 0);
+            const enough = balance >= c.cost;
+            return (
+              <div key={c.id} style={{ background: 'white', borderRadius: '12px', padding: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '28px' }}>{c.icon}</div>
+                <div style={{ flex: 1, minWidth: '140px' }}>
+                  <div style={{ fontWeight: 600, fontSize: '14px' }}>{c.name}</div>
+                  <div style={{ fontSize: '11px', color: '#8A7560', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                    <div className="avatar" style={{ background: m?.color, width: '18px', height: '18px', fontSize: '9px' }}>{m?.initial}</div>
+                    {m?.name} pidió canjearlo
+                  </div>
+                </div>
+                <div className="serif" style={{ fontSize: '16px', fontWeight: 700, color: c.type === 'money' ? '#7BA05B' : '#F5B645' }}>
+                  {c.type === 'money' ? formatMoney(c.cost) : `${c.cost} pts`}
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button className="btn-ghost" onClick={() => rejectClaim(c.id)}>Rechazar</button>
+                  <button className="btn-success" disabled={!enough} onClick={() => approveClaim(c.id)} style={!enough ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
+                    <Check size={14} /> Aprobar
+                  </button>
+                </div>
+                {!enough && <div style={{ width: '100%', fontSize: '11px', color: '#C0392B', fontWeight: 600 }}>Saldo insuficiente: tiene {balance}, necesita {c.cost}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {rewards.length === 0 && (
+        <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
+          <Gift size={48} color="#D4C5B0" style={{ marginBottom: '14px' }} />
+          <div className="serif" style={{ fontSize: '20px', fontWeight: 600, marginBottom: '6px' }}>Aún no hay premios</div>
+          <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '14px' }}>
+            {isAdmin ? 'Cargá los premios que tu familia puede canjear con sus puntos o dinero ganado.' : 'Pídele a un adulto que cargue premios para canjear.'}
+          </p>
+          {isAdmin && <button className="btn-primary" onClick={() => setModal({ type: 'reward', data: null })}><Plus size={16} /> Crear primer premio</button>}
+        </div>
+      )}
+
+      {rewards.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+          {rewards.map(r => {
+            // Saldo máximo entre los hijos para saber si es alcanzable por alguien
+            const maxBalance = kidKeys.reduce((max, k) => {
+              const bal = r.type === 'money' ? (money[k] || 0) : (points[k] || 0);
+              return Math.max(max, bal);
+            }, 0);
+            const affordable = maxBalance >= r.cost;
+            const outOfStock = r.stock !== undefined && r.stock !== null && r.stock <= 0;
+            return (
+              <div key={r.id} className={`reward-card ${affordable ? 'affordable' : 'expensive'}`} style={outOfStock ? { opacity: 0.4 } : {}}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '40px' }}>{r.icon}</div>
+                  {isAdmin && <button onClick={() => setModal({ type: 'reward', data: r })} style={{ background: '#FBF5E9', border: 'none', borderRadius: '8px', padding: '6px', cursor: 'pointer', color: '#8A7560' }}><Edit2 size={13} /></button>}
+                </div>
+                <div className="serif" style={{ fontSize: '17px', fontWeight: 600, marginBottom: '8px', minHeight: '44px' }}>{r.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '6px' }}>
+                  <div className="serif" style={{ fontSize: '24px', fontWeight: 700, color: r.type === 'money' ? '#7BA05B' : '#F5B645' }}>
+                    {r.type === 'money' ? formatMoney(r.cost) : `${r.cost} pts`}
+                  </div>
+                  {r.stock !== undefined && r.stock !== null && (
+                    <div style={{ fontSize: '11px', color: outOfStock ? '#C0392B' : '#8A7560', fontWeight: 600 }}>
+                      {outOfStock ? 'Sin stock' : `Stock: ${r.stock}`}
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="btn-primary"
+                  style={{ width: '100%', justifyContent: 'center', opacity: outOfStock ? 0.5 : 1 }}
+                  disabled={outOfStock}
+                  onClick={() => setModal({ type: 'whoClaims', reward: r })}
+                >
+                  <Gift size={14} /> Solicitar canje
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {recentApproved.length > 0 && (
+        <div className="card">
+          <div className="serif" style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>Últimos canjes aprobados</div>
+          {recentApproved.map(c => {
+            const m = family[c.who];
+            return (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 0', borderBottom: '1px solid #F5EFE6' }}>
+                <div style={{ fontSize: '24px' }}>{c.icon}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500 }}>{c.name}</div>
+                  <div style={{ fontSize: '11px', color: '#8A7560' }}>{m?.name} · {c.date}</div>
+                </div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: c.type === 'money' ? '#7BA05B' : '#F5B645' }}>
+                  -{c.type === 'money' ? formatMoney(c.cost) : `${c.cost} pts`}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// LISTS VIEW (sin cambios)
+// ============================================================================
 
 function ListsView({ lists, toggleListItem, deleteListItem, clearCompletedItems, isAdmin, setModal }) {
   return (
@@ -1666,20 +2330,73 @@ function ListsView({ lists, toggleListItem, deleteListItem, clearCompletedItems,
   );
 }
 
-function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewFilter }) {
-  const sorted = [...history].sort((a, b) => b.date.localeCompare(a.date));
+// ============================================================================
+// HISTORY VIEW (con récord + selector semana/mes)
+// ============================================================================
+
+function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, rewards, streaks, viewFilter }) {
+  const [periodMode, setPeriodMode] = useState('month'); // 'week' | 'month'
+  const [cursor, setCursor] = useState(() => new Date());
+
+  // Récord histórico (no se filtra)
+  const recordData = useMemo(() => {
+    let max = 0;
+    let holders = [];
+    kidKeys.forEach(k => {
+      const b = streaks[k]?.best || 0;
+      if (b > max) { max = b; holders = [k]; }
+      else if (b === max && b > 0) holders.push(k);
+    });
+    return { max, holders };
+  }, [kidKeys, streaks]);
+
+  const goPrev = () => {
+    if (periodMode === 'week') {
+      const d = new Date(cursor); d.setDate(d.getDate() - 7); setCursor(d);
+    } else {
+      setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1));
+    }
+  };
+  const goNext = () => {
+    if (periodMode === 'week') {
+      const d = new Date(cursor); d.setDate(d.getDate() + 7); setCursor(d);
+    } else {
+      setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1));
+    }
+  };
+  const goToday = () => setCursor(new Date());
+
+  // Filtrar history por período
+  const periodHistory = useMemo(() => {
+    if (periodMode === 'week') return history.filter(h => isInWeekRange(h.date, cursor));
+    return history.filter(h => isInMonthRange(h.date, cursor));
+  }, [history, periodMode, cursor]);
+
+  const sorted = [...periodHistory].sort((a, b) => b.date.localeCompare(a.date));
   const filtered = viewFilter === 'all' ? sorted : sorted.filter(h => h.who === viewFilter);
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const monthHist = history.filter(h => h.date.startsWith(currentMonth));
+
   const stats = kidKeys.map(k => {
-    const kidHist = monthHist.filter(h => h.who === k);
-    return { k, ...family[k], routinesDone: kidHist.filter(h => h.kind === 'routine').length, jobsDone: kidHist.filter(h => h.kind === 'job').length, moneyEarned: kidHist.reduce((s, h) => s + (h.money || 0), 0), pointsEarned: kidHist.reduce((s, h) => s + (h.points || 0), 0) };
+    const kidHist = periodHistory.filter(h => h.who === k);
+    return {
+      k,
+      ...family[k],
+      routinesDone: kidHist.filter(h => h.kind === 'routine').length,
+      jobsDone: kidHist.filter(h => h.kind === 'job').length,
+      bonusCount: kidHist.filter(h => h.kind === 'bonus').length,
+      rewardCount: kidHist.filter(h => h.kind === 'reward').length,
+      moneyEarned: kidHist.filter(h => h.kind !== 'reward').reduce((s, h) => s + (h.money || 0), 0),
+      moneySpent:  kidHist.filter(h => h.kind === 'reward' && h.money).reduce((s, h) => s + Math.abs(h.money || 0), 0),
+      pointsEarned: kidHist.filter(h => h.kind !== 'reward').reduce((s, h) => s + (h.points || 0), 0),
+      pointsSpent:  kidHist.filter(h => h.kind === 'reward' && h.points).reduce((s, h) => s + Math.abs(h.points || 0), 0),
+    };
   });
+
   const findRoutineTitle = (h) => {
-    const direct = (routines[h.who] || []).find(rt => rt.id === h.templateId);
-    if (direct) return direct.text || direct.label || '?';
-    const shared = (routines.shared || []).find(rt => rt.id === h.templateId);
-    if (shared) return shared.text || shared.label || '?';
+    for (const k of Object.keys(routines)) {
+      const list = routines[k] || [];
+      const found = list.find(rt => rt.id === h.templateId);
+      if (found) return found.text || found.label || '?';
+    }
     return '?';
   };
   const getTitle = (h) => {
@@ -1687,13 +2404,70 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
     if (h.kind === 'task') return tasks.find(t => t.id === h.templateId)?.text || '?';
     if (h.kind === 'job') return bigJobs.find(j => j.id === h.templateId)?.title || '?';
     if (h.kind === 'routine') return findRoutineTitle(h);
+    if (h.kind === 'reward') return rewards.find(r => r.id === h.templateId)?.name || '?';
+    if (h.kind === 'bonus') return 'Bonus por completar el día';
     return '?';
   };
-  const kindLabel = { task: 'Tarea', routine: 'Rutina', job: 'Trabajo' };
-  const kindColor = { task: '#5B96B0', routine: '#F5B645', job: '#7BA05B' };
+
+  const kindLabel = { task: 'Tarea', routine: 'Rutina', job: 'Trabajo', bonus: 'Bonus', reward: 'Premio' };
+  const kindColor = { task: '#5B96B0', routine: '#F5B645', job: '#7BA05B', bonus: '#E8804F', reward: '#9B7FB8' };
+
+  const periodLabel = periodMode === 'week' ? formatWeekRange(cursor) : `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`;
+
   return (
     <div>
-      <div className="serif" style={{ fontSize: '28px', fontWeight: 600, marginBottom: '16px' }}>Historial del mes</div>
+      <div className="serif" style={{ fontSize: '28px', fontWeight: 600, marginBottom: '16px' }}>Historial</div>
+
+      {/* Tarjeta del récord histórico */}
+      {recordData.max > 0 && (
+        <div className="card" style={{
+          marginBottom: '20px',
+          background: 'linear-gradient(135deg, #FFEFAA 0%, #FFD45A 100%)',
+          border: '2px solid #E8B746',
+          textAlign: 'center'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '10px' }}>
+            <Crown size={26} color="#A67C12" />
+            <div style={{ fontSize: '12px', color: '#6B4F18', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Récord de la casa</div>
+            <Crown size={26} color="#A67C12" />
+          </div>
+          <div className="serif" style={{ fontSize: '52px', fontWeight: 700, color: '#6B4F18', lineHeight: 1 }}>
+            {recordData.max} <span style={{ fontSize: '22px' }}>días</span>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '14px', flexWrap: 'wrap' }}>
+            {recordData.holders.map(k => {
+              const m = family[k];
+              if (!m) return null;
+              return (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', padding: '8px 14px', borderRadius: '999px', boxShadow: '0 2px 6px rgba(168,124,18,0.2)' }}>
+                  <div className="avatar" style={{ background: m.color, width: '28px', height: '28px', fontSize: '12px' }}>{m.initial}</div>
+                  <div className="serif" style={{ fontSize: '15px', fontWeight: 700, color: '#3D2E1F' }}>{m.name}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: '12px', color: '#6B4F18', marginTop: '12px', fontStyle: 'italic' }}>
+            {recordData.holders.length === 1 ? 'Es el mejor de la familia. ¿Quién lo supera?' : 'Empatados en el primer lugar. ¿Quién corta primero?'}
+          </div>
+        </div>
+      )}
+
+      {/* Selector de período */}
+      <div className="card" style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '6px', background: '#FBF5E9', padding: '4px', borderRadius: '12px' }}>
+            <button className={`view-toggle-btn ${periodMode === 'week' ? 'selected' : ''}`} onClick={() => setPeriodMode('week')}>Semana</button>
+            <button className={`view-toggle-btn ${periodMode === 'month' ? 'selected' : ''}`} onClick={() => setPeriodMode('month')}>Mes</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button onClick={goPrev} className="btn-ghost" style={{ padding: '8px 10px' }}><ChevronLeft size={16} /></button>
+            <div className="serif" style={{ fontSize: '17px', fontWeight: 600, minWidth: '170px', textAlign: 'center', textTransform: 'capitalize' }}>{periodLabel}</div>
+            <button onClick={goNext} className="btn-ghost" style={{ padding: '8px 10px' }}><ChevronRight size={16} /></button>
+          </div>
+          <button onClick={goToday} className="btn-ghost">Ahora</button>
+        </div>
+      </div>
+
       {kidKeys.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '20px' }}>
           {stats.map(s => (
@@ -1705,32 +2479,39 @@ function HistoryView({ family, kidKeys, history, tasks, bigJobs, routines, viewF
               <div style={{ display: 'grid', gap: '6px', fontSize: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Rutinas</span><span style={{ fontWeight: 700 }}>{s.routinesDone}</span></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Trabajos</span><span style={{ fontWeight: 700 }}>{s.jobsDone}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Dinero</span><span style={{ fontWeight: 700, color: '#7BA05B' }}>${s.moneyEarned.toLocaleString('es-AR')}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Puntos</span><span style={{ fontWeight: 700, color: s.color }}>{s.pointsEarned}</span></div>
+                {s.bonusCount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Días con bonus</span><span style={{ fontWeight: 700, color: '#E8804F' }}>{s.bonusCount}</span></div>}
+                {s.rewardCount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Premios canjeados</span><span style={{ fontWeight: 700, color: '#9B7FB8' }}>{s.rewardCount}</span></div>}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Dinero ganado</span><span style={{ fontWeight: 700, color: '#7BA05B' }}>${s.moneyEarned.toLocaleString('es-AR')}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Puntos ganados</span><span style={{ fontWeight: 700, color: s.color }}>{s.pointsEarned}</span></div>
+                {s.pointsSpent > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8A7560' }}>Puntos gastados</span><span style={{ fontWeight: 700, color: '#9B7FB8' }}>-{s.pointsSpent}</span></div>}
               </div>
             </div>
           ))}
         </div>
       )}
+
       <div className="card">
-        <div className="serif" style={{ fontSize: '20px', fontWeight: 600, marginBottom: '14px' }}>Actividad reciente</div>
-        {filtered.length === 0 && <div style={{ color: '#8A7560' }}>Aún no hay actividad registrada.</div>}
-        {filtered.slice(0, 30).map(h => (
-          <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', borderBottom: '1px solid #F5EFE6' }}>
-            <div className="avatar" style={{ background: family[h.who]?.color || '#999', width: '30px', height: '30px', fontSize: '12px' }}>
-              {family[h.who]?.role === 'pet' ? family[h.who].emoji : family[h.who]?.initial}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTitle(h)}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
-                <div className="pill" style={{ background: kindColor[h.kind] + '20', color: kindColor[h.kind], fontWeight: 600 }}>{kindLabel[h.kind]}</div>
-                <span style={{ fontSize: '11px', color: '#8A7560' }}>{h.date}</span>
+        <div className="serif" style={{ fontSize: '20px', fontWeight: 600, marginBottom: '14px' }}>Actividad</div>
+        {filtered.length === 0 && <div style={{ color: '#8A7560' }}>No hay actividad para este período.</div>}
+        {filtered.slice(0, 60).map(h => {
+          const isNegative = h.kind === 'reward';
+          return (
+            <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', borderBottom: '1px solid #F5EFE6' }}>
+              <div className="avatar" style={{ background: family[h.who]?.color || '#999', width: '30px', height: '30px', fontSize: '12px' }}>
+                {family[h.who]?.role === 'pet' ? family[h.who].emoji : family[h.who]?.initial}
               </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTitle(h)}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                  <div className="pill" style={{ background: kindColor[h.kind] + '20', color: kindColor[h.kind], fontWeight: 600 }}>{kindLabel[h.kind] || h.kind}</div>
+                  <span style={{ fontSize: '11px', color: '#8A7560' }}>{h.date}</span>
+                </div>
+              </div>
+              {h.points !== undefined && h.points !== 0 && <div style={{ fontSize: '12px', fontWeight: 700, color: isNegative ? '#9B7FB8' : '#F5B645' }}>{h.points > 0 ? '+' : ''}{h.points} pts</div>}
+              {h.money !== undefined && h.money !== 0 && <div style={{ fontSize: '12px', fontWeight: 700, color: isNegative ? '#9B7FB8' : '#7BA05B' }}>{h.money > 0 ? '+' : ''}${Math.abs(h.money).toLocaleString('es-AR')}</div>}
             </div>
-            {h.points && <div style={{ fontSize: '12px', fontWeight: 700, color: '#F5B645' }}>+{h.points} pts</div>}
-            {h.money && <div style={{ fontSize: '12px', fontWeight: 700, color: '#7BA05B' }}>+${h.money.toLocaleString('es-AR')}</div>}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1750,10 +2531,9 @@ function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySi
   const month = cursor.getMonth();
   const monthLabel = `${MONTHS[month]} ${year}`;
 
-  // Generar las 6 semanas del mes (42 celdas)
   const cells = useMemo(() => {
     const firstDay = new Date(year, month, 1);
-    const startDow = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1; // lunes = 0
+    const startDow = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
     const cells = [];
     const start = new Date(year, month, 1 - startDow);
     for (let i = 0; i < 42; i++) {
@@ -1785,19 +2565,16 @@ function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySi
     closePicker();
   };
 
-  // Para el balance: contamos todos los platos cargados en el MES VISIBLE (lunch + dinner)
-  // Los normalizamos a "veces por semana" dividiendo por 4.3 (semanas por mes promedio)
   const balanceData = useMemo(() => {
     const counts = {};
     MEAL_BALANCE_CATEGORIES.forEach(c => { counts[c.id] = 0; });
     cells.forEach(d => {
-      if (d.getMonth() !== month) return; // sólo del mes actual
+      if (d.getMonth() !== month) return;
       const k = dateKey(d);
       const day = meals[k];
       if (!day) return;
       [day.lunch, day.dinner].forEach(meal => {
         if (!meal) return;
-        // El meal puede tener id (catálogo) o ser custom (sólo name)
         if (meal.id) {
           const fullMeal = getMealById(meal.id);
           if (fullMeal) {
@@ -1806,7 +2583,6 @@ function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySi
         }
       });
     });
-    // Normalizar: todos los conteos los pasamos a "veces por semana"
     const weeksInMonth = 4.3;
     const perWeek = {};
     Object.keys(counts).forEach(k => { perWeek[k] = counts[k] / weeksInMonth; });
@@ -1826,7 +2602,6 @@ function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySi
         </div>
       </div>
 
-      {/* Navegación de mes */}
       <div className="card" style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1837,14 +2612,12 @@ function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySi
           <button onClick={goToday} className="btn-ghost">Hoy</button>
         </div>
 
-        {/* Cabecera de días */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginBottom: '6px' }}>
           {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d => (
             <div key={d} style={{ fontSize: '11px', color: '#8A7560', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center', padding: '4px 0' }}>{d}</div>
           ))}
         </div>
 
-        {/* Grilla del mes */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
           {cells.map((d, idx) => {
             const inMonth = d.getMonth() === month;
@@ -1856,18 +2629,8 @@ function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySi
                 <div style={{ fontSize: '11px', fontWeight: 700, color: isToday ? '#3D2E1F' : '#8A7560', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span>{d.getDate()}</span>
                 </div>
-                <MealSlot
-                  label="A"
-                  meal={day.lunch}
-                  onClick={() => isAdmin && openPicker(k, 'lunch', day.lunch)}
-                  disabled={!isAdmin}
-                />
-                <MealSlot
-                  label="C"
-                  meal={day.dinner}
-                  onClick={() => isAdmin && openPicker(k, 'dinner', day.dinner)}
-                  disabled={!isAdmin}
-                />
+                <MealSlot label="A" meal={day.lunch} onClick={() => isAdmin && openPicker(k, 'lunch', day.lunch)} disabled={!isAdmin} />
+                <MealSlot label="C" meal={day.dinner} onClick={() => isAdmin && openPicker(k, 'dinner', day.dinner)} disabled={!isAdmin} />
               </div>
             );
           })}
@@ -1878,7 +2641,6 @@ function MealsView({ meals, setMealForDate, showBalance, toggleBalance, familySi
         </div>
       </div>
 
-      {/* Balance */}
       {showBalance && <BalanceCard balanceData={balanceData} />}
 
       {pickerState && (
@@ -1916,18 +2678,14 @@ function MealSlot({ label, meal, onClick, disabled }) {
   );
 }
 
-// Donut anidada: anillo externo = sugerido, anillo interno = real
 function BalanceCard({ balanceData }) {
   const { perWeek } = balanceData;
-  // Excluimos 'fried' del cálculo principal (es un límite, no objetivo). Lo mostramos aparte.
   const objectives = MEAL_BALANCE_CATEGORIES.filter(c => !c.isLimit);
   const limits = MEAL_BALANCE_CATEGORIES.filter(c => c.isLimit);
 
-  // Calcular porcentajes para cada anillo
   const totalSuggested = objectives.reduce((s, c) => s + c.suggested, 0);
   const totalActual = objectives.reduce((s, c) => s + (perWeek[c.id] || 0), 0);
 
-  // Ring config
   const size = 280;
   const cx = size / 2;
   const cy = size / 2;
@@ -1948,21 +2706,19 @@ function BalanceCard({ balanceData }) {
     return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 0 ${end.x} ${end.y}`;
   };
 
-  // Outer ring (sugerido)
   let outerCursor = 0;
   const outerSegments = objectives.map(cat => {
     const portion = (cat.suggested / totalSuggested) * 360;
-    const seg = { id: cat.id, startAngle: outerCursor, endAngle: outerCursor + portion, color: cat.color, label: cat.label, value: cat.suggested };
+    const seg = { id: cat.id, startAngle: outerCursor, endAngle: outerCursor + portion, color: cat.color };
     outerCursor += portion;
     return seg;
   });
 
-  // Inner ring (real)
   let innerCursor = 0;
   const innerSegments = totalActual > 0 ? objectives.map(cat => {
     const v = perWeek[cat.id] || 0;
     const portion = (v / totalActual) * 360;
-    const seg = { id: cat.id, startAngle: innerCursor, endAngle: innerCursor + portion, color: cat.color, label: cat.label, value: v };
+    const seg = { id: cat.id, startAngle: innerCursor, endAngle: innerCursor + portion, color: cat.color };
     innerCursor += portion;
     return seg;
   }) : [];
@@ -1974,25 +2730,20 @@ function BalanceCard({ balanceData }) {
         <div className="serif" style={{ fontSize: '20px', fontWeight: 600 }}>Balance del mes</div>
       </div>
       <p style={{ fontSize: '12px', color: '#8A7560', marginBottom: '20px', lineHeight: 1.5 }}>
-        Anillo exterior: distribución <strong>sugerida</strong> para una alimentación variada · Anillo interior: <strong>tu menú actual</strong> normalizado por semana
+        Anillo exterior: distribución <strong>sugerida</strong> · Anillo interior: <strong>tu menú actual</strong> normalizado por semana
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ maxWidth: '100%', height: 'auto' }}>
-            {/* Outer ring background */}
             <circle cx={cx} cy={cy} r={outerR} fill="none" stroke="#F5EFE6" strokeWidth={outerStroke} />
-            {/* Outer ring (sugerido) */}
             {outerSegments.map(seg => (
               <path key={`o-${seg.id}`} d={arcPath(outerR, seg.startAngle, seg.endAngle)} fill="none" stroke={seg.color} strokeWidth={outerStroke} strokeLinecap="butt" opacity={0.55} />
             ))}
-            {/* Inner ring background */}
             <circle cx={cx} cy={cy} r={innerR} fill="none" stroke="#F5EFE6" strokeWidth={innerStroke} />
-            {/* Inner ring (real) */}
             {innerSegments.map(seg => (
               <path key={`i-${seg.id}`} d={arcPath(innerR, seg.startAngle, seg.endAngle)} fill="none" stroke={seg.color} strokeWidth={innerStroke} strokeLinecap="butt" />
             ))}
-            {/* Center text */}
             <text x={cx} y={cy - 8} textAnchor="middle" fontFamily="Fraunces, serif" fontWeight="700" fontSize="22" fill="#3D2E1F">{totalActual.toFixed(1)}</text>
             <text x={cx} y={cy + 14} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="11" fill="#8A7560">cargas/sem</text>
             {totalActual === 0 && (
@@ -2001,12 +2752,10 @@ function BalanceCard({ balanceData }) {
           </svg>
         </div>
 
-        {/* Leyenda con barras de comparación */}
         <div style={{ minWidth: '220px', flex: 1 }}>
           {objectives.map(cat => {
             const actual = perWeek[cat.id] || 0;
             const suggested = cat.suggested;
-            const ratio = suggested > 0 ? Math.min(actual / suggested, 1.5) : 0;
             const status = actual === 0 ? 'empty' : actual < suggested * 0.7 ? 'low' : actual > suggested * 1.4 ? 'high' : 'ok';
             return (
               <div key={cat.id} style={{ marginBottom: '12px' }}>
@@ -2021,14 +2770,12 @@ function BalanceCard({ balanceData }) {
                 </div>
                 <div style={{ height: '6px', background: '#F5EFE6', borderRadius: '3px', overflow: 'hidden', position: 'relative' }}>
                   <div style={{ width: `${(actual / Math.max(suggested * 1.5, 0.1)) * 100}%`, maxWidth: '100%', height: '100%', background: cat.color, transition: 'width 0.4s ease', opacity: status === 'empty' ? 0.3 : 1 }}/>
-                  {/* Marcador del objetivo */}
                   <div style={{ position: 'absolute', left: `${(suggested / Math.max(suggested * 1.5, 0.1)) * 100}%`, top: '-2px', bottom: '-2px', width: '2px', background: '#3D2E1F', opacity: 0.4 }}/>
                 </div>
               </div>
             );
           })}
 
-          {/* Límites (frituras) */}
           {limits.map(cat => {
             const actual = perWeek[cat.id] || 0;
             const limit = cat.suggested;
@@ -2067,7 +2814,6 @@ function MealPickerModal({ dateKey: dKey, slot, currentMeal, onSelect, onClear, 
     return MEAL_CATALOG.filter(m => m.name.toLowerCase().includes(q) || m.category.toLowerCase().includes(q));
   }, [search]);
 
-  // Agrupar por categoría
   const byCategory = useMemo(() => {
     const groups = {};
     filtered.forEach(m => {
@@ -2077,9 +2823,7 @@ function MealPickerModal({ dateKey: dKey, slot, currentMeal, onSelect, onClear, 
     return groups;
   }, [filtered]);
 
-  const handlePickFromCatalog = (meal) => {
-    onSelect({ id: meal.id });
-  };
+  const handlePickFromCatalog = (meal) => onSelect({ id: meal.id });
   const handleSaveCustom = () => {
     if (!customName.trim()) return;
     onSelect({ name: customName.trim() });
@@ -2149,7 +2893,7 @@ function MealPickerModal({ dateKey: dKey, slot, currentMeal, onSelect, onClear, 
 }
 
 // ============================================================================
-// MODALES
+// MODALES BÁSICOS
 // ============================================================================
 
 function PinPrompt({ onSuccess, onCancel }) {
@@ -2176,6 +2920,105 @@ function PinPrompt({ onSuccess, onCancel }) {
     </div>
   );
 }
+
+// ===== "Quién pide" para premios =====
+function WhoClaimsModal({ family, kidKeys, reward, points, money, onPick, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', textAlign: 'center' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: '16px', right: '16px', background: '#FBF5E9', border: 'none', borderRadius: '50%', width: '34px', height: '34px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={17} /></button>
+        <div style={{ fontSize: '52px', marginBottom: '8px' }}>{reward.icon}</div>
+        <div className="serif" style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>{reward.name}</div>
+        <div className="serif" style={{ fontSize: '24px', fontWeight: 700, color: reward.type === 'money' ? '#7BA05B' : '#F5B645', marginBottom: '20px' }}>
+          {reward.type === 'money' ? formatMoney(reward.cost) : `${reward.cost} pts`}
+        </div>
+        <div style={{ fontSize: '15px', color: '#5A4F42', fontWeight: 600, marginBottom: '14px' }}>¿Quién pide este premio?</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px' }}>
+          {kidKeys.map(k => {
+            const m = family[k];
+            const balance = reward.type === 'money' ? (money[k] || 0) : (points[k] || 0);
+            const enough = balance >= reward.cost;
+            return (
+              <button
+                key={k}
+                onClick={() => onPick(k)}
+                disabled={!enough}
+                style={{
+                  background: enough ? 'white' : '#FBF5E9',
+                  border: `2px solid ${enough ? m.color : '#E8DEC9'}`,
+                  borderRadius: '16px',
+                  padding: '14px 10px',
+                  cursor: enough ? 'pointer' : 'not-allowed',
+                  fontFamily: 'inherit',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                  opacity: enough ? 1 : 0.55,
+                  transition: 'all 0.15s'
+                }}
+              >
+                <div className="avatar" style={{ background: m.color, width: '48px', height: '48px', fontSize: '22px' }}>{m.initial}</div>
+                <div className="serif" style={{ fontSize: '15px', fontWeight: 700, color: '#3D2E1F' }}>{m.name}</div>
+                <div style={{ fontSize: '11px', color: enough ? '#7BA05B' : '#C0392B', fontWeight: 600 }}>
+                  {enough ? `Tiene ${balance}` : `Le faltan ${reward.cost - balance}`}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== "Quién hizo el trabajo" (solo trabajos compartidos) =====
+function WhoSubmitsJobModal({ family, job, onPick, onClose }) {
+  const members = itemMembers(job);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px', textAlign: 'center' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: '16px', right: '16px', background: '#FBF5E9', border: 'none', borderRadius: '50%', width: '34px', height: '34px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={17} /></button>
+        <div style={{ fontSize: '48px', marginBottom: '8px' }}>{job.icon}</div>
+        <div className="serif" style={{ fontSize: '20px', fontWeight: 700, marginBottom: '6px' }}>{job.title}</div>
+        <div style={{ fontSize: '13px', color: '#8A7560', marginBottom: '20px' }}>Trabajo compartido</div>
+        <div style={{ fontSize: '15px', color: '#5A4F42', fontWeight: 600, marginBottom: '14px' }}>¿Quién lo hizo?</div>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(members.length, 3)}, 1fr)`, gap: '10px' }}>
+          {members.map(k => {
+            const m = family[k];
+            if (!m) return null;
+            return (
+              <button
+                key={k}
+                onClick={() => onPick(k)}
+                style={{
+                  background: 'white',
+                  border: `2px solid ${m.color}`,
+                  borderRadius: '16px',
+                  padding: '14px 10px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.15s'
+                }}
+              >
+                <div className="avatar" style={{ background: m.color, width: '48px', height: '48px', fontSize: '22px' }}>{m.role === 'pet' ? m.emoji : m.initial}</div>
+                <div className="serif" style={{ fontSize: '15px', fontWeight: 700, color: '#3D2E1F' }}>{m.name}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SETTINGS MODAL
+// ============================================================================
 
 function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily }) {
   const [tab, setTab] = useState('share');
@@ -2238,21 +3081,19 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
         </div>
 
         {tab === 'share' && (
-          <div>
-            <div className="editor-section" style={{ background: 'linear-gradient(135deg, #FFF8EE 0%, #FFE8D6 100%)', textAlign: 'center', padding: '24px' }}>
-              <Share2 size={28} color="#3D2E1F" style={{ margin: '0 auto 10px' }} />
-              <div className="serif" style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>Tu código de familia</div>
-              <p style={{ fontSize: '12px', color: '#8A7560', marginBottom: '14px' }}>Compartilo para que otros dispositivos vean los mismos datos.</p>
-              <div style={{ background: '#3D2E1F', color: '#FDFAF3', padding: '14px', borderRadius: '12px', marginBottom: '12px' }}>
-                <div className="serif" style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '0.05em' }}>{familyCode}</div>
-              </div>
-              <button className="btn-primary" onClick={copyCode} style={{ width: '100%', justifyContent: 'center' }}>
-                <Copy size={14} /> {copied ? '¡Copiado!' : 'Copiar código'}
-              </button>
-              <p style={{ fontSize: '11px', color: '#8A7560', fontStyle: 'italic', marginTop: '12px', lineHeight: 1.5 }}>
-                Cualquiera con este código puede ver y editar los datos. No lo compartas con desconocidos.
-              </p>
+          <div className="editor-section" style={{ background: 'linear-gradient(135deg, #FFF8EE 0%, #FFE8D6 100%)', textAlign: 'center', padding: '24px' }}>
+            <Share2 size={28} color="#3D2E1F" style={{ margin: '0 auto 10px' }} />
+            <div className="serif" style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>Tu código de familia</div>
+            <p style={{ fontSize: '12px', color: '#8A7560', marginBottom: '14px' }}>Compartilo para que otros dispositivos vean los mismos datos.</p>
+            <div style={{ background: '#3D2E1F', color: '#FDFAF3', padding: '14px', borderRadius: '12px', marginBottom: '12px' }}>
+              <div className="serif" style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '0.05em' }}>{familyCode}</div>
             </div>
+            <button className="btn-primary" onClick={copyCode} style={{ width: '100%', justifyContent: 'center' }}>
+              <Copy size={14} /> {copied ? '¡Copiado!' : 'Copiar código'}
+            </button>
+            <p style={{ fontSize: '11px', color: '#8A7560', fontStyle: 'italic', marginTop: '12px', lineHeight: 1.5 }}>
+              Cualquiera con este código puede ver y editar los datos. No lo compartas con desconocidos.
+            </p>
           </div>
         )}
 
@@ -2310,25 +3151,21 @@ function SettingsModal({ config, familyCode, onUpdate, onClose, onResetFamily })
         )}
 
         {tab === 'pin' && (
-          <div>
-            <div className="editor-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}><Lock size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Cambiar PIN</div></div>
-              <div className="field"><div className="label">PIN actual</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.current} onChange={(e) => setPinChange({ ...pinChange, current: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
-              <div className="field"><div className="label">PIN nuevo</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.newPin} onChange={(e) => setPinChange({ ...pinChange, newPin: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
-              <div className="field"><div className="label">Repetir</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.confirm} onChange={(e) => setPinChange({ ...pinChange, confirm: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
-              {pinChange.message && (<div style={{ padding: '10px 12px', borderRadius: '10px', fontSize: '13px', marginBottom: '12px', background: pinChange.message.type === 'success' ? '#EDF4E2' : '#FCEBE6', color: pinChange.message.type === 'success' ? '#3D5C26' : '#C0392B' }}>{pinChange.message.text}</div>)}
-              <button className="btn-primary" onClick={handlePinChange}>Cambiar PIN</button>
-            </div>
+          <div className="editor-section">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}><Lock size={16} /><div style={{ fontSize: '14px', fontWeight: 700 }}>Cambiar PIN</div></div>
+            <div className="field"><div className="label">PIN actual</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.current} onChange={(e) => setPinChange({ ...pinChange, current: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
+            <div className="field"><div className="label">PIN nuevo</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.newPin} onChange={(e) => setPinChange({ ...pinChange, newPin: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
+            <div className="field"><div className="label">Repetir</div><input className="input" type="password" inputMode="numeric" maxLength={4} value={pinChange.confirm} onChange={(e) => setPinChange({ ...pinChange, confirm: e.target.value.replace(/\D/g, '').slice(0, 4), message: null })} placeholder="••••" /></div>
+            {pinChange.message && (<div style={{ padding: '10px 12px', borderRadius: '10px', fontSize: '13px', marginBottom: '12px', background: pinChange.message.type === 'success' ? '#EDF4E2' : '#FCEBE6', color: pinChange.message.type === 'success' ? '#3D5C26' : '#C0392B' }}>{pinChange.message.text}</div>)}
+            <button className="btn-primary" onClick={handlePinChange}>Cambiar PIN</button>
           </div>
         )}
 
         {tab === 'danger' && (
-          <div>
-            <div style={{ background: '#FCEBE6', padding: '16px', borderRadius: '12px', marginBottom: '14px' }}>
-              <div style={{ fontWeight: 600, color: '#C0392B', marginBottom: '6px' }}>Salir de esta familia</div>
-              <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '12px' }}>Te desconecta de la familia actual en este dispositivo. Los datos en la nube se conservan, podés volver con el código.</p>
-              <button className="btn-danger" onClick={onResetFamily}><Trash2 size={14} /> Salir de la familia</button>
-            </div>
+          <div style={{ background: '#FCEBE6', padding: '16px', borderRadius: '12px', marginBottom: '14px' }}>
+            <div style={{ fontWeight: 600, color: '#C0392B', marginBottom: '6px' }}>Salir de esta familia</div>
+            <p style={{ fontSize: '13px', color: '#8A7560', marginBottom: '12px' }}>Te desconecta de la familia actual en este dispositivo. Los datos en la nube se conservan, podés volver con el código.</p>
+            <button className="btn-danger" onClick={onResetFamily}><Trash2 size={14} /> Salir de la familia</button>
           </div>
         )}
       </div>
@@ -2384,6 +3221,10 @@ function EditorPetRow({ pet, usedColors, onUpdate, onRemove }) {
     </div>
   );
 }
+
+// ============================================================================
+// MODALES (TASK / JOB / EVENT / ROUTINE / TEMPLATES / LIST / REWARD)
+// ============================================================================
 
 function ModalShell({ title, onClose, onSave, onDelete, hasId, children }) {
   return (
@@ -2542,23 +3383,34 @@ function TaskModal({ data, family, onSave, onDelete, onClose }) {
 }
 
 function JobModal({ data, family, kidKeys, onSave, onDelete, onClose }) {
-  const kids = {}; kidKeys.forEach(k => { kids[k] = family[k]; });
+  const initialWhoIds = Array.isArray(data?.whoIds) ? data.whoIds : (data?.who ? [data.who] : (kidKeys[0] ? [kidKeys[0]] : []));
   const [title, setTitle] = useState(data?.title || '');
   const [icon, setIcon] = useState(data?.icon || '🌱');
-  const [who, setWho] = useState(data?.who || kidKeys[0]);
+  const [whoIds, setWhoIds] = useState(initialWhoIds);
   const [rewardType, setRewardType] = useState(data?.reward?.type || 'points');
   const [rewardValue, setRewardValue] = useState(data?.reward?.value || 5);
   const [deadline, setDeadline] = useState(data?.deadline || 'Hoy');
   const [notes, setNotes] = useState(data?.notes || '');
   const [recurrence, setRecurrence] = useState(data?.recurrence || { type: 'once', startDate: todayKey() });
-  const handleSave = () => { if (title.trim()) onSave({ id: data?.id, title, icon, who, reward: { type: rewardType, value: Number(rewardValue) }, deadline, notes, recurrence }); };
+
+  const handleSave = () => {
+    if (!title.trim()) return;
+    if (whoIds.length === 0) { alert('Asigná el trabajo a al menos un hijo.'); return; }
+    onSave({ id: data?.id, title, icon, whoIds, reward: { type: rewardType, value: Number(rewardValue) }, deadline, notes, recurrence });
+  };
+
   return (
     <ModalShell title={data ? 'Editar trabajo' : 'Nuevo trabajo'} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
       <div className="field"><div className="label">Trabajo</div><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej: Cortar el pasto" autoFocus /></div>
       <IconPicker icons={['🌱','🚗','👗','🧸','🪴','🐠','🧹','🪟','🛋️','🍽️','📚','🧺','🚿','🌻']} value={icon} onChange={setIcon} />
-      <PersonPicker family={kids} value={who} onChange={setWho} />
+      <MultiPersonPicker family={family} allowedKeys={kidKeys} values={whoIds} onChange={setWhoIds} label="Asignar a (hijos)" />
       <div className="field"><div className="label">Recompensa</div><div style={{ display: 'flex', gap: '8px' }}><div className={`toggle-pill ${rewardType === 'points' ? 'selected' : ''}`} onClick={() => setRewardType('points')}><Star size={14}/> Puntos</div><div className={`toggle-pill ${rewardType === 'money' ? 'selected' : ''}`} onClick={() => setRewardType('money')}><DollarSign size={14}/> Dinero</div></div></div>
       <div className="field"><div className="label">{rewardType === 'money' ? 'Monto' : 'Puntos'}</div><input className="input" type="number" value={rewardValue} onChange={(e) => setRewardValue(e.target.value)} /></div>
+      {whoIds.length > 1 && (
+        <div style={{ background: '#FFF4E0', padding: '10px 12px', borderRadius: '10px', fontSize: '12px', color: '#6B4F18', marginBottom: '14px' }}>
+          ⚠️ Trabajo compartido: cada hijo cobra la recompensa entera al completarlo.
+        </div>
+      )}
       <div className="field"><div className="label">Para cuándo</div><input className="input" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></div>
       <div className="field"><div className="label">Notas</div><textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ resize: 'vertical' }} /></div>
       <RecurrencePicker recurrence={recurrence} onChange={setRecurrence} />
@@ -2601,15 +3453,7 @@ function RoutineModal({ data, member, memberData, family, kidKeys, onSave, onDel
     if (!text.trim()) return;
     if (whoIds.length === 0) { alert('Asigná la rutina a al menos un hijo.'); return; }
     const base = isYoung ? { label: text } : { text };
-    const payload = {
-      id: data?.id,
-      ...base,
-      icon,
-      points,
-      timeOfDay,
-      recurrence,
-      whoIds,
-    };
+    const payload = { id: data?.id, ...base, icon, points, timeOfDay, recurrence, whoIds };
     onSave(payload);
   };
 
@@ -2726,6 +3570,67 @@ function ListItemModal({ data, onSave, onClose }) {
   return (
     <ModalShell title="Agregar item" onClose={onClose} onSave={handleSave} hasId={!!data}>
       <div className="field"><div className="label">Item</div><input className="input" value={text} onChange={(e) => setText(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleSave()} /></div>
+    </ModalShell>
+  );
+}
+
+// ===== MODAL PARA PREMIOS =====
+function RewardModal({ data, onSave, onDelete, onClose }) {
+  const [name, setName] = useState(data?.name || '');
+  const [icon, setIcon] = useState(data?.icon || '🎁');
+  const [type, setType] = useState(data?.type || 'points');
+  const [cost, setCost] = useState(data?.cost ?? 30);
+  const [hasStock, setHasStock] = useState(data?.stock !== undefined && data?.stock !== null);
+  const [stock, setStock] = useState(data?.stock ?? 10);
+  const [showSuggestions, setShowSuggestions] = useState(!data);
+
+  const applySuggestion = (s) => {
+    setName(s.name);
+    setIcon(s.icon);
+    setType(s.type);
+    setCost(s.cost);
+    setShowSuggestions(false);
+  };
+
+  const handleSave = () => {
+    if (!name.trim()) return;
+    const payload = { id: data?.id, name: name.trim(), icon, type, cost: Number(cost) };
+    if (hasStock) payload.stock = Number(stock);
+    else payload.stock = null;
+    onSave(payload);
+  };
+
+  return (
+    <ModalShell title={data ? 'Editar premio' : 'Nuevo premio'} onClose={onClose} onSave={handleSave} onDelete={data ? () => onDelete(data.id) : null} hasId={!!data}>
+      {showSuggestions && !data && (
+        <div className="editor-section" style={{ background: '#FBF5E9', marginBottom: '14px' }}>
+          <div style={{ fontSize: '12px', color: '#8A7560', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>Sugerencias rápidas</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '6px' }}>
+            {REWARD_SUGGESTIONS.map((s, i) => (
+              <button key={i} onClick={() => applySuggestion(s)} style={{ background: 'white', border: '1.5px solid #E8DEC9', borderRadius: '10px', padding: '8px 10px', cursor: 'pointer', fontFamily: 'inherit', fontSize: '12px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '6px', color: '#3D2E1F' }}>
+                <span style={{ fontSize: '18px' }}>{s.icon}</span>
+                <span style={{ flex: 1, lineHeight: 1.2 }}>{s.name}</span>
+                <span style={{ fontSize: '10px', color: '#A67C12', fontWeight: 700 }}>{s.cost}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setShowSuggestions(false)} className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }}>O crear desde cero</button>
+        </div>
+      )}
+
+      <div className="field"><div className="label">Nombre del premio</div><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: 30 min de pantallas extra" autoFocus /></div>
+      <IconPicker icons={REWARD_ICONS} value={icon} onChange={setIcon} />
+      <div className="field"><div className="label">Tipo de costo</div><div style={{ display: 'flex', gap: '8px' }}><div className={`toggle-pill ${type === 'points' ? 'selected' : ''}`} onClick={() => setType('points')}><Star size={14}/> Puntos</div><div className={`toggle-pill ${type === 'money' ? 'selected' : ''}`} onClick={() => setType('money')}><DollarSign size={14}/> Dinero</div></div></div>
+      <div className="field"><div className="label">{type === 'money' ? 'Monto' : 'Puntos requeridos'}</div><input className="input" type="number" min="1" value={cost} onChange={(e) => setCost(e.target.value)} /></div>
+
+      <div className="field">
+        <div className="label">Stock</div>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+          <div className={`toggle-pill ${!hasStock ? 'selected' : ''}`} onClick={() => setHasStock(false)}>Ilimitado</div>
+          <div className={`toggle-pill ${hasStock ? 'selected' : ''}`} onClick={() => setHasStock(true)}>Limitado</div>
+        </div>
+        {hasStock && <input className="input" type="number" min="0" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="Cantidad disponible" />}
+      </div>
     </ModalShell>
   );
 }

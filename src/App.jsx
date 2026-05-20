@@ -721,70 +721,109 @@ function MainApp({ familyCode, cloudData, syncStatus, onResetFamily }) {
     setTimeout(() => setBigCelebration(null), 2800);
   };
 
-  const toggleTask = (taskId, displayWho, e) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const existing = history.find(h => h.kind === 'task' && h.templateId === taskId && h.date === tk && h.who === displayWho);
-    if (existing) {
-      saveToCloud({ history: history.filter(h => h.id !== existing.id) });
-    } else {
-      const rect = e.currentTarget.getBoundingClientRect();
+const toggleTask = (taskId, displayWho, e) => {
+  // Evitar doble disparo en mobile (touch + click)
+  if (e && e.stopPropagation) e.stopPropagation();
+  const task = tasks.find(t => String(t.id) === String(taskId));
+  if (!task) return;
+  // Comparación robusta: convertir a string para evitar problemas con tipos
+  const existing = history.find(h =>
+    h.kind === 'task' &&
+    String(h.templateId) === String(taskId) &&
+    h.date === tk &&
+    h.who === displayWho
+  );
+  if (existing) {
+    saveToCloud({ history: history.filter(h => h.id !== existing.id) });
+  } else {
+    const rect = e?.currentTarget?.getBoundingClientRect?.();
+    if (rect) {
       triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[displayWho]?.color || '#3D2E1F');
-      saveToCloud({ history: [...history, { id: Date.now(), kind: 'task', templateId: taskId, date: tk, who: displayWho }] });
     }
-  };
+    saveToCloud({ history: [...history, { id: Date.now() + Math.floor(Math.random() * 1000), kind: 'task', templateId: taskId, date: tk, who: displayWho }] });
+  }
+};
 
-  // Toggle de rutina ahora actualiza puntos, bonus en historial, y streaks
-  const toggleRoutine = (kid, itemId, e) => {
-    const todays = todaysRoutinesFor(kid);
-    const item = todays.find(r => r.id === itemId);
-    if (!item) return;
-    const itemPoints = item.points || 1;
-    const totalDayPoints = todays.reduce((s, r) => s + (r.points || 1), 0);
-    const dayBonus = Math.round(totalDayPoints * bonusPct / 100);
-    const existing = history.find(h => h.kind === 'routine' && h.templateId === itemId && h.date === tk && h.who === kid);
+  // Toggle de rutina con fix robusto del bug de destildar
+const toggleRoutine = (kid, itemId, e) => {
+  // Evitar doble disparo en mobile (touch + click) y bubble
+  if (e && e.stopPropagation) e.stopPropagation();
 
-    if (existing) {
-      // Destildar
-      const wasAllDone = todays.every(r => r.done);
-      let updates = {
-        history: history.filter(h => h.id !== existing.id),
-        points: { ...points, [kid]: Math.max(0, (points[kid] || 0) - itemPoints) },
-      };
-      if (wasAllDone && dayBonus > 0) {
-        // Buscar y eliminar la entrada de bonus también
-        updates.history = updates.history.filter(h => !(h.kind === 'bonus' && h.who === kid && h.date === tk));
-        updates.points = { ...updates.points, [kid]: Math.max(0, (points[kid] || 0) - itemPoints - dayBonus) };
-      }
-      // Actualizar streak (ahora ya no está completo)
-      updates.streaks = updateStreakForKid(streaks, kid, false, tk);
-      saveToCloud(updates);
-    } else {
-      // Tildar
-      const rect = e.currentTarget.getBoundingClientRect();
-      const willAllBeDone = todays.every(r => r.id === itemId || r.done);
+  const todays = todaysRoutinesFor(kid);
+  const item = todays.find(r => String(r.id) === String(itemId));
+  if (!item) return;
+  const itemPoints = item.points || 1;
+  const totalDayPoints = todays.reduce((s, r) => s + (r.points || 1), 0);
+  const dayBonus = Math.round(totalDayPoints * bonusPct / 100);
+
+  // Comparación robusta: forzar string en ambos lados para evitar problemas de tipo
+  const existing = history.find(h =>
+    h.kind === 'routine' &&
+    String(h.templateId) === String(itemId) &&
+    h.date === tk &&
+    h.who === kid
+  );
+
+  if (existing) {
+    // ===== DESTILDAR =====
+    // Detectar si el día estaba COMPLETO antes de destildar
+    // (necesario para saber si había bonus que quitar)
+    const wasAllDone = todays.every(r => r.done);
+    const currentPoints = points[kid] || 0;
+
+    // Restar puntos: itemPoints siempre; dayBonus solo si el día estaba completo
+    const pointsToSubtract = itemPoints + (wasAllDone && dayBonus > 0 ? dayBonus : 0);
+    const newPointsForKid = Math.max(0, currentPoints - pointsToSubtract);
+
+    // Filtrar history: quitar la entrada de routine y, si aplica, también la de bonus de hoy
+    let newHistory = history.filter(h => h.id !== existing.id);
+    if (wasAllDone && dayBonus > 0) {
+      newHistory = newHistory.filter(h => !(h.kind === 'bonus' && h.who === kid && h.date === tk));
+    }
+
+    // La racha SOLO se rompe si el día estaba completo y ahora no lo está
+    // Si el día NO estaba completo, la racha no se tocó al tildar, así que no hay nada que romper
+    let newStreaks = streaks;
+    if (wasAllDone) {
+      newStreaks = updateStreakForKid(streaks, kid, false, tk);
+    }
+
+    saveToCloud({
+      history: newHistory,
+      points: { ...points, [kid]: newPointsForKid },
+      streaks: newStreaks,
+    });
+  } else {
+    // ===== TILDAR =====
+    const rect = e?.currentTarget?.getBoundingClientRect?.();
+    const willAllBeDone = todays.every(r => String(r.id) === String(itemId) || r.done);
+
+    if (rect) {
       triggerConfetti(rect.left + rect.width/2, rect.top + rect.height/2, family[kid].color);
       triggerPointsAnimation(rect.left + rect.width/2, rect.top + rect.height/2, kid, itemPoints);
-      let newHistory = [...history, { id: Date.now(), kind: 'routine', templateId: itemId, date: tk, who: kid, points: itemPoints }];
-      let newPoints = { ...points, [kid]: (points[kid] || 0) + itemPoints };
-      let newStreaks = streaks;
-
-      if (willAllBeDone && dayBonus > 0) {
-        newHistory.push({ id: Date.now() + 1, kind: 'bonus', date: tk, who: kid, points: dayBonus, title: 'Bonus por completar el día' });
-        newPoints = { ...newPoints, [kid]: newPoints[kid] + dayBonus };
-        triggerBigCelebration(family[kid].name, family[kid].color, `¡Rutina completa! +${dayBonus} bonus`);
-        newStreaks = updateStreakForKid(streaks, kid, true, tk);
-        // Mensaje extra si subió racha
-        const oldS = getLiveStreak(streaks, kid);
-        const newS = newStreaks[kid] || { current: 0, best: 0 };
-        if (newS.current > oldS.current && newS.current > 1) {
-          setTimeout(() => triggerBigCelebration(family[kid].name, family[kid].color, `🔥 Racha de ${newS.current} días`), 1200);
-        }
-      }
-
-      saveToCloud({ history: newHistory, points: newPoints, streaks: newStreaks });
     }
-  };
+
+    const newEntryId = Date.now() + Math.floor(Math.random() * 1000);
+    let newHistory = [...history, { id: newEntryId, kind: 'routine', templateId: itemId, date: tk, who: kid, points: itemPoints }];
+    let newPoints = { ...points, [kid]: (points[kid] || 0) + itemPoints };
+    let newStreaks = streaks;
+
+    if (willAllBeDone && dayBonus > 0) {
+      newHistory.push({ id: newEntryId + 1, kind: 'bonus', date: tk, who: kid, points: dayBonus, title: 'Bonus por completar el día' });
+      newPoints = { ...newPoints, [kid]: newPoints[kid] + dayBonus };
+      triggerBigCelebration(family[kid].name, family[kid].color, `¡Rutina completa! +${dayBonus} bonus`);
+      newStreaks = updateStreakForKid(streaks, kid, true, tk);
+      // Mensaje extra si subió racha
+      const oldS = getLiveStreak(streaks, kid);
+      const newS = newStreaks[kid] || { current: 0, best: 0 };
+      if (newS.current > oldS.current && newS.current > 1) {
+        setTimeout(() => triggerBigCelebration(family[kid].name, family[kid].color, `🔥 Racha de ${newS.current} días`), 1200);
+      }
+    }
+
+    saveToCloud({ history: newHistory, points: newPoints, streaks: newStreaks });
+  }
+};
 
   const toggleListItem = (listId, itemId, e) => {
     const list = lists.find(l => l.id === listId);

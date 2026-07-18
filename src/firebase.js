@@ -71,10 +71,13 @@ export const generateTripCode = () => {
 };
 
 // Suscribirse a los datos de un viaje
-export const subscribeTripData = (tripCode, onUpdate) => {
+export const subscribeTripData = (tripCode, onUpdate, onError) => {
   const tripRef = ref(db, `trips/${tripCode}`);
   onValue(tripRef, (snapshot) => {
     onUpdate(snapshot.val());
+  }, (error) => {
+    console.error('Error leyendo viaje en Firebase:', error);
+    onError?.(error);
   });
   return () => off(tripRef);
 };

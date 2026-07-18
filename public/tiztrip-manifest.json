@@ -1,0 +1,20 @@
+{
+  "name": "TizTrip",
+  "short_name": "TizTrip",
+  "description": "Organizá tu viaje: itinerario, pasajes, actividades y alertas compartidas",
+  "start_url": "/tiztrip.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FDFAF3",
+  "theme_color": "#3D2E1F",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "/tiztrip-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ import {
 import {
   generateTripCode, subscribeTripData, saveTripNode, removeTripNode, checkTripCodeExists,
 } from '../firebase.js';
-import { SEED_PARIS } from './seedParis.js';
+import { SEED_PARIS, SEED_TRIP_CODE } from './seedParis.js';
 
 // ============================================================================
 // RAÍZ
@@ -51,7 +51,7 @@ export default function ViajeApp() {
       return false;
     }
     const exists = await checkTripCodeExists(cleanCode);
-    if (!exists) {
+    if (!exists && cleanCode !== SEED_TRIP_CODE) {
       alert(`No encontramos un viaje con el código "${cleanCode}". Verificá que esté bien escrito.`);
       return false;
     }
@@ -85,6 +85,23 @@ export default function ViajeApp() {
   }
 
   if (trip.empty || !trip.config) {
+    // El código fijo del plan precargado crea el viaje solo: nombre y adentro
+    if (tripCode === SEED_TRIP_CODE) {
+      return <JoinProfile
+        trip={{ config: SEED_PARIS.config, members: trip.members || {} }}
+        onLeave={handleLeaveTrip}
+        onSubmit={async (name, color) => {
+          await saveTripNode(tripCode, 'config', { ...SEED_PARIS.config, createdAt: Date.now() });
+          const newMember = await handleSetMember(name, color);
+          for (const ev of SEED_PARIS.events) {
+            const id = generateId();
+            await saveTripNode(tripCode, `events/${id}`, {
+              ...ev, id, photos: [], createdBy: newMember.id, createdAt: Date.now(), updatedAt: Date.now(),
+            });
+          }
+        }}
+      />;
+    }
     return <TripSetup tripCode={tripCode} onLeave={handleLeaveTrip} onComplete={async (config, name, color, seedEvents) => {
       await saveTripNode(tripCode, 'config', config);
       const newMember = await handleSetMember(name, color);

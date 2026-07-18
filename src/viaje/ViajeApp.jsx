@@ -32,6 +32,8 @@ export default function ViajeApp() {
     const unsubscribe = subscribeTripData(tripCode, (data) => {
       setTrip(data || { empty: true });
       setSyncStatus('connected');
+    }, (error) => {
+      setSyncStatus(`error:${error?.code || error?.message || 'desconocido'}`);
     });
     return () => { try { unsubscribe(); } catch { /* ya desuscripto */ } };
   }, [tripCode]);
@@ -79,7 +81,7 @@ export default function ViajeApp() {
   }
 
   if (!trip) {
-    return <LoadingScreen />;
+    return <LoadingScreen error={syncStatus.startsWith('error:') ? syncStatus.slice(6) : null} onLeave={handleLeaveTrip} />;
   }
 
   if (trip.empty || !trip.config) {
@@ -246,12 +248,27 @@ function WelcomeFlow({ onNew, onJoin }) {
   );
 }
 
-function LoadingScreen() {
+function LoadingScreen({ error, onLeave }) {
+  const isPermission = /permission|denied/i.test(error || '');
   return (
-    <div style={{ ...screenStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+    <div style={{ ...screenStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24, textAlign: 'center' }}>
       <SharedStyles />
-      <div style={{ fontSize: 48, animation: 'vj-pulse 1.2s infinite' }}>✈️</div>
-      <p style={{ color: INK_SOFT }}>Cargando tu viaje…</p>
+      <div style={{ fontSize: 48, animation: error ? 'none' : 'vj-pulse 1.2s infinite' }}>{error ? '🛑' : '✈️'}</div>
+      {!error && <p style={{ color: INK_SOFT }}>Cargando tu viaje…</p>}
+      {error && (
+        <>
+          <p style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 700, margin: 0 }}>No pudimos conectar con el viaje</p>
+          <p style={{ color: INK_SOFT, fontSize: 14.5, margin: 0, maxWidth: 340 }}>
+            {isPermission
+              ? 'La base de datos rechazó el acceso. Hay que habilitar la ruta "trips" en las reglas de Firebase (Realtime Database → Reglas), igual que está "families".'
+              : `Error: ${error}. Revisá la conexión a internet y probá de nuevo.`}
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+            <PrimaryButton onClick={() => window.location.reload()} style={{ width: 'auto', padding: '13px 22px' }}>Reintentar</PrimaryButton>
+            <GhostButton onClick={onLeave} style={{ width: 'auto', padding: '13px 22px' }}>Salir</GhostButton>
+          </div>
+        </>
+      )}
     </div>
   );
 }

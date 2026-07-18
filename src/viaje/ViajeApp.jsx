@@ -76,6 +76,11 @@ export default function ViajeApp() {
     window.location.reload();
   };
 
+  const handlePickMember = (m) => {
+    saveState(MEMBER_KEY, m);
+    setMember(m);
+  };
+
   if (!tripCode) {
     return <WelcomeFlow onNew={handleCreateTrip} onJoin={handleJoinTrip} />;
   }
@@ -90,6 +95,7 @@ export default function ViajeApp() {
       return <JoinProfile
         trip={{ config: SEED_PARIS.config, members: trip.members || {} }}
         onLeave={handleLeaveTrip}
+        onPick={handlePickMember}
         onSubmit={async (name, color) => {
           await saveTripNode(tripCode, 'config', { ...SEED_PARIS.config, createdAt: Date.now() });
           const newMember = await handleSetMember(name, color);
@@ -115,7 +121,7 @@ export default function ViajeApp() {
   }
 
   if (!member) {
-    return <JoinProfile trip={trip} onSubmit={(name, color) => handleSetMember(name, color)} onLeave={handleLeaveTrip} />;
+    return <JoinProfile trip={trip} onSubmit={(name, color) => handleSetMember(name, color)} onPick={handlePickMember} onLeave={handleLeaveTrip} />;
   }
 
   return (
@@ -124,6 +130,7 @@ export default function ViajeApp() {
       trip={trip}
       member={member}
       syncStatus={syncStatus}
+      onMemberChange={handlePickMember}
       onLeave={handleLeaveTrip}
     />
   );
@@ -419,10 +426,32 @@ function TripSetup({ tripCode, onComplete, onLeave }) {
 // UNIRSE: ELEGIR NOMBRE Y COLOR
 // ============================================================================
 
-function JoinProfile({ trip, onSubmit, onLeave }) {
+function JoinProfile({ trip, onSubmit, onPick, onLeave }) {
+  const members = Object.values(trip.members || {}).sort((a, b) => a.joinedAt - b.joinedAt);
+  const [mode, setMode] = useState(members.length > 0 ? 'pick' : 'new');
+  const [pinFor, setPinFor] = useState(null);
+  const [pin, setPin] = useState('');
   const [name, setName] = useState('');
   const [color, setColor] = useState(null);
-  const usedColors = Object.values(trip.members || {}).map(m => m.color);
+  const usedColors = members.map(m => m.color);
+
+  const handlePickExisting = (m) => {
+    if (m.pin) {
+      setPinFor(m);
+      setPin('');
+      return;
+    }
+    if (confirm(`¿Entrar como ${m.name} en este teléfono?`)) onPick(m);
+  };
+
+  const handlePinSubmit = () => {
+    if (pin.trim() === String(pinFor.pin)) {
+      onPick(pinFor);
+    } else {
+      alert('PIN incorrecto');
+      setPin('');
+    }
+  };
 
   return (
     <div style={{ ...screenStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
@@ -431,27 +460,82 @@ function JoinProfile({ trip, onSubmit, onLeave }) {
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div style={{ fontSize: 52 }}>{trip.config.emoji || '✈️'}</div>
           <h1 style={{ fontFamily: SERIF, fontSize: 25, fontWeight: 700, margin: '8px 0 4px' }}>{trip.config.name}</h1>
-          <p style={{ color: INK_SOFT, margin: 0, fontSize: 15 }}>¿Quién sos? Así todos saben quién agrega cada plan.</p>
+          <p style={{ color: INK_SOFT, margin: 0, fontSize: 15 }}>
+            {mode === 'pick' ? '¿Quién sos? Tocá tu nombre.' : 'Contanos quién sos, así todos saben quién agrega cada plan.'}
+          </p>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <input autoFocus placeholder="Tu nombre" value={name} onChange={e => setName(e.target.value)} style={{ textAlign: 'center', fontSize: 17 }} />
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
-            {MEMBER_COLORS.map(c => (
+
+        {mode === 'pick' && !pinFor && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {members.map(m => (
               <button
-                key={c}
+                key={m.id}
                 className="vj-press"
-                onClick={() => setColor(c)}
+                onClick={() => handlePickExisting(m)}
                 style={{
-                  width: 38, height: 38, borderRadius: '50%', background: c,
-                  border: color === c ? `3px solid ${INK}` : '3px solid transparent',
-                  opacity: usedColors.includes(c) && color !== c ? 0.35 : 1,
+                  display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                  background: '#fff', border: '1.5px solid #E8DEC9', borderRadius: 14, padding: '11px 14px',
                 }}
-              />
+              >
+                <div style={{ width: 40, height: 40, borderRadius: '50%', background: m.color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 17 }}>
+                  {m.name.charAt(0).toUpperCase()}
+                </div>
+                <span style={{ fontWeight: 600, fontSize: 16, flex: 1 }}>{m.name}</span>
+                {m.pin && <span style={{ fontSize: 13, color: INK_SOFT }}>🔒</span>}
+              </button>
             ))}
+            <button onClick={() => setMode('new')} style={{ background: 'transparent', color: INK_SOFT, fontSize: 14.5, padding: 10, textDecoration: 'underline' }}>
+              No estoy en la lista — soy nuevo/a
+            </button>
+            <GhostButton onClick={onLeave} style={{ border: 'none', color: INK_SOFT, background: 'transparent' }}>Salir</GhostButton>
           </div>
-          <PrimaryButton onClick={() => name.trim() ? onSubmit(name, color) : alert('Poné tu nombre')}>Entrar al viaje</PrimaryButton>
-          <GhostButton onClick={onLeave} style={{ border: 'none', color: INK_SOFT, background: 'transparent' }}>Salir</GhostButton>
-        </div>
+        )}
+
+        {mode === 'pick' && pinFor && (
+          <div className="vj-card" style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+            <p style={{ margin: 0, fontWeight: 600 }}>PIN de {pinFor.name}</p>
+            <input
+              autoFocus
+              type="password"
+              inputMode="numeric"
+              placeholder="••••"
+              value={pin}
+              onChange={e => setPin(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handlePinSubmit()}
+              style={{ textAlign: 'center', fontSize: 22, letterSpacing: 6, maxWidth: 180 }}
+            />
+            <PrimaryButton onClick={handlePinSubmit}>Entrar como {pinFor.name}</PrimaryButton>
+            <button onClick={() => setPinFor(null)} style={{ background: 'transparent', color: INK_SOFT, fontSize: 14, textDecoration: 'underline' }}>Volver</button>
+          </div>
+        )}
+
+        {mode === 'new' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <input autoFocus placeholder="Tu nombre" value={name} onChange={e => setName(e.target.value)} style={{ textAlign: 'center', fontSize: 17 }} />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+              {MEMBER_COLORS.map(c => (
+                <button
+                  key={c}
+                  className="vj-press"
+                  onClick={() => setColor(c)}
+                  title={usedColors.includes(c) ? 'Color ya usado por otro viajero' : ''}
+                  style={{
+                    width: 38, height: 38, borderRadius: '50%', background: c,
+                    border: color === c ? `3px solid ${INK}` : '3px solid transparent',
+                    opacity: usedColors.includes(c) && color !== c ? 0.35 : 1,
+                  }}
+                />
+              ))}
+            </div>
+            <PrimaryButton onClick={() => name.trim() ? onSubmit(name, color) : alert('Poné tu nombre')}>Entrar al viaje</PrimaryButton>
+            {members.length > 0 && (
+              <button onClick={() => setMode('pick')} style={{ background: 'transparent', color: INK_SOFT, fontSize: 14.5, padding: 4, textDecoration: 'underline' }}>
+                Ya estoy en la lista de viajeros
+              </button>
+            )}
+            <GhostButton onClick={onLeave} style={{ border: 'none', color: INK_SOFT, background: 'transparent' }}>Salir</GhostButton>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -461,7 +545,7 @@ function JoinProfile({ trip, onSubmit, onLeave }) {
 // APP PRINCIPAL
 // ============================================================================
 
-function MainApp({ tripCode, trip, member, syncStatus, onLeave }) {
+function MainApp({ tripCode, trip, member, syncStatus, onMemberChange, onLeave }) {
   const [tab, setTab] = useState('plan');
   const [eventModal, setEventModal] = useState(null); // null | {mode:'new', date} | {mode:'edit', event}
   const [detailEvent, setDetailEvent] = useState(null);
@@ -507,7 +591,7 @@ function MainApp({ tripCode, trip, member, syncStatus, onLeave }) {
           <DocsView tripCode={tripCode} docs={docs} member={member} members={members} onFullPhoto={setFullPhoto} />
         )}
         {tab === 'people' && (
-          <PeopleView tripCode={tripCode} config={config} members={members} member={member} onLeave={onLeave} />
+          <PeopleView tripCode={tripCode} config={config} members={members} member={member} onMemberChange={onMemberChange} onLeave={onLeave} />
         )}
       </div>
 
@@ -1105,9 +1189,15 @@ function DocsView({ tripCode, docs, member, members, onFullPhoto }) {
 // VIAJE: CÓDIGO, GENTE, NOTIFICACIONES, AJUSTES
 // ============================================================================
 
-function PeopleView({ tripCode, config, members, member, onLeave }) {
+function PeopleView({ tripCode, config, members, member, onMemberChange, onLeave }) {
   const [editingTrip, setEditingTrip] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const handleRemoveMember = async (m) => {
+    if (!confirm(`¿Sacar a ${m.name} de la lista de viajeros? Los planes que agregó se conservan. Útil para borrar duplicados.`)) return;
+    await removeTripNode(tripCode, `members/${m.id}`);
+  };
 
   const shareText = `¡Sumate a "${config.name}" en TizTrip! 🌎\n\n1. Entrá a ${window.location.origin}/tiztrip.html\n2. Tocá "Tengo un código de viaje"\n3. Ingresá el código: ${tripCode}`;
 
@@ -1164,14 +1254,25 @@ function PeopleView({ tripCode, config, members, member, onLeave }) {
               <div style={{ width: 34, height: 34, borderRadius: '50%', background: m.color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>
                 {m.name.charAt(0).toUpperCase()}
               </div>
-              <span style={{ fontWeight: 600 }}>{m.name}</span>
-              {m.id === member.id && <span style={{ fontSize: 12, background: '#F5EDDE', color: INK_SOFT, borderRadius: 10, padding: '2px 8px' }}>vos</span>}
+              <span style={{ fontWeight: 600, flex: 1 }}>
+                {m.name}
+                {m.pin && <span style={{ fontSize: 12, marginLeft: 6 }}>🔒</span>}
+                {m.id === member.id && <span style={{ fontSize: 12, background: '#F5EDDE', color: INK_SOFT, borderRadius: 10, padding: '2px 8px', marginLeft: 8 }}>vos</span>}
+              </span>
+              {m.id !== member.id && (
+                <button onClick={() => handleRemoveMember(m)} title="Sacar de la lista" style={{ background: 'none', color: '#C77', padding: 4 }}>
+                  <Trash2 size={15} />
+                </button>
+              )}
             </div>
           ))}
         </div>
       </div>
 
       <div className="vj-card" style={{ background: '#fff', borderRadius: 16, padding: 16, boxShadow: CARD_SHADOW, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <GhostButton onClick={() => setEditingProfile(true)}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={16} /> Mi perfil (nombre, color y PIN)</span>
+        </GhostButton>
         <GhostButton onClick={() => setEditingTrip(true)}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Edit2 size={16} /> Editar datos del viaje</span>
         </GhostButton>
@@ -1183,7 +1284,78 @@ function PeopleView({ tripCode, config, members, member, onLeave }) {
       {editingTrip && (
         <EditTripSheet tripCode={tripCode} config={config} onClose={() => setEditingTrip(false)} />
       )}
+
+      {editingProfile && (
+        <ProfileSheet
+          tripCode={tripCode}
+          member={member}
+          members={members}
+          onSaved={onMemberChange}
+          onClose={() => setEditingProfile(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function ProfileSheet({ tripCode, member, members, onSaved, onClose }) {
+  const [name, setName] = useState(member.name);
+  const [color, setColor] = useState(member.color);
+  const [pin, setPin] = useState(member.pin ? String(member.pin) : '');
+  const [saving, setSaving] = useState(false);
+  const usedColors = members.filter(m => m.id !== member.id).map(m => m.color);
+
+  const handleSave = async () => {
+    if (!name.trim()) { alert('Poné tu nombre'); return; }
+    const cleanPin = pin.trim();
+    if (cleanPin && cleanPin.length < 4) { alert('El PIN tiene que tener al menos 4 números'); return; }
+    setSaving(true);
+    const updated = { ...member, name: name.trim(), color, pin: cleanPin || null };
+    await saveTripNode(tripCode, `members/${member.id}`, updated);
+    onSaved(updated);
+    onClose();
+  };
+
+  return (
+    <Sheet onClose={onClose} title="Mi perfil">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div>
+          <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>Tu nombre</label>
+          <input value={name} onChange={e => setName(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 6 }}>Tu color</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {MEMBER_COLORS.map(c => (
+              <button
+                key={c}
+                className="vj-press"
+                onClick={() => setColor(c)}
+                style={{
+                  width: 38, height: 38, borderRadius: '50%', background: c,
+                  border: color === c ? `3px solid ${INK}` : '3px solid transparent',
+                  opacity: usedColors.includes(c) && color !== c ? 0.35 : 1,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+        <div>
+          <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>🔒 PIN (opcional)</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="ej: 1234 — para que nadie entre como vos"
+            value={pin}
+            onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+          />
+          <p style={{ color: INK_SOFT, fontSize: 12.5, margin: '6px 0 0' }}>
+            Si lo ponés, al elegir tu nombre desde otro teléfono van a tener que escribirlo. Dejalo vacío para entrar sin PIN.
+          </p>
+        </div>
+        <PrimaryButton onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</PrimaryButton>
+      </div>
+    </Sheet>
   );
 }
 

@@ -9,7 +9,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
-        viaje: resolve(import.meta.dirname, 'viaje.html'),
+        tiztrip: resolve(import.meta.dirname, 'tiztrip.html'),
       },
     },
   },

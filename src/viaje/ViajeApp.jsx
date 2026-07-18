@@ -117,15 +117,16 @@ export default function ViajeApp() {
 function SharedStyles() {
   return (
     <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
       html, body { margin: 0; padding: 0; }
-      body { background: #F4F8FB; }
+      body { background: #FDFAF3; }
       input, select, textarea, button { font-family: inherit; font-size: inherit; }
       input, select, textarea {
-        width: 100%; padding: 12px 14px; border: 2px solid #DCE6EF; border-radius: 12px;
-        background: #fff; color: #1E3A5F; outline: none; transition: border-color 0.15s;
+        width: 100%; padding: 12px 14px; border: 1.5px solid #E8DEC9; border-radius: 12px;
+        background: #FBF5E9; color: #3D2E1F; outline: none; transition: border-color 0.15s, background 0.15s;
       }
-      input:focus, select:focus, textarea:focus { border-color: #2C5F8A; }
+      input:focus, select:focus, textarea:focus { border-color: #3D2E1F; background: #fff; }
       button { cursor: pointer; border: none; }
       @keyframes vj-fadeup { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes vj-fadein { from { opacity: 0; } to { opacity: 1; } }
@@ -139,11 +140,12 @@ function SharedStyles() {
 }
 
 const FONT = '"DM Sans", -apple-system, "Segoe UI", Roboto, sans-serif';
-const INK = '#1E3A5F';
-const INK_SOFT = '#5C7799';
+const SERIF = '"Fraunces", Georgia, serif';
+const INK = '#3D2E1F';
+const INK_SOFT = '#8A7560';
 const ACCENT = '#E8804F';
-const BG = '#F4F8FB';
-const CARD_SHADOW = '0 2px 12px rgba(30, 58, 95, 0.08)';
+const BG = '#FDFAF3';
+const CARD_SHADOW = '0 2px 12px rgba(61, 46, 31, 0.08)';
 
 const screenStyle = {
   minHeight: '100vh',
@@ -159,9 +161,9 @@ function PrimaryButton({ children, onClick, disabled, style }) {
       onClick={onClick}
       disabled={disabled}
       style={{
-        width: '100%', padding: '15px', borderRadius: 14, fontWeight: 700, fontSize: 16,
-        background: disabled ? '#B9C9D8' : `linear-gradient(135deg, #2C5F8A, ${INK})`,
-        color: '#fff', boxShadow: disabled ? 'none' : '0 4px 14px rgba(30, 58, 95, 0.3)',
+        width: '100%', padding: '15px', borderRadius: 14, fontWeight: 600, fontSize: 15,
+        background: disabled ? '#D4C5B0' : INK,
+        color: '#FDFAF3', boxShadow: disabled ? 'none' : '0 4px 14px rgba(61, 46, 31, 0.25)',
         transition: 'transform 0.1s', ...style,
       }}
     >
@@ -177,7 +179,7 @@ function GhostButton({ children, onClick, style }) {
       onClick={onClick}
       style={{
         width: '100%', padding: '14px', borderRadius: 14, fontWeight: 600, fontSize: 15,
-        background: '#fff', color: INK, border: '2px solid #DCE6EF', transition: 'transform 0.1s', ...style,
+        background: '#fff', color: INK, border: '2px solid #E8DEC9', transition: 'transform 0.1s', ...style,
       }}
     >
       {children}
@@ -202,11 +204,11 @@ function WelcomeFlow({ onNew, onJoin }) {
   };
 
   return (
-    <div style={{ ...screenStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: `linear-gradient(160deg, #EAF2F9 0%, ${BG} 45%, #FDEEDC 100%)` }}>
+    <div style={{ ...screenStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'linear-gradient(135deg, #FFF8EE 0%, #FDFAF3 50%, #FFE8D6 100%)' }}>
       <SharedStyles />
       <div className="vj-card" style={{ width: '100%', maxWidth: 420, textAlign: 'center' }}>
         <div style={{ fontSize: 64, marginBottom: 8 }}>✈️</div>
-        <h1 style={{ fontSize: 34, margin: '0 0 6px', letterSpacing: -0.5 }}>Bendito Viaje</h1>
+        <h1 style={{ fontFamily: SERIF, fontSize: 38, fontWeight: 700, margin: '0 0 6px', letterSpacing: -0.5 }}>TizTrip</h1>
         <p style={{ color: INK_SOFT, fontSize: 16, margin: '0 0 32px' }}>
           Itinerario, pasajes y actividades compartidas.<br />Con alertas en el teléfono de todos.
         </p>
@@ -297,7 +299,7 @@ function TripSetup({ tripCode, onComplete, onLeave }) {
     <div style={{ ...screenStyle, padding: '32px 20px 40px' }}>
       <SharedStyles />
       <div className="vj-card" style={{ maxWidth: 460, margin: '0 auto' }}>
-        <h1 style={{ fontSize: 26, margin: '0 0 4px' }}>Armemos tu viaje</h1>
+        <h1 style={{ fontFamily: SERIF, fontSize: 27, fontWeight: 700, margin: '0 0 4px' }}>Armemos tu viaje</h1>
         <p style={{ color: INK_SOFT, margin: '0 0 24px', fontSize: 15 }}>
           Código del viaje: <b style={{ color: INK }}>{tripCode}</b> — compartilo después para sumar gente.
         </p>
@@ -309,7 +311,7 @@ function TripSetup({ tripCode, onComplete, onLeave }) {
             style={{
               textAlign: 'left', borderRadius: 14, padding: '13px 14px',
               background: useSeed ? '#FDEEDC' : '#fff',
-              border: useSeed ? `2px solid ${ACCENT}` : '2px dashed #CBD9E5',
+              border: useSeed ? `2px solid ${ACCENT}` : '2px dashed #DFD3BC',
               display: 'flex', alignItems: 'center', gap: 10,
             }}
           >
@@ -346,7 +348,7 @@ function TripSetup({ tripCode, onComplete, onLeave }) {
                   style={{
                     fontSize: 24, width: 46, height: 46, borderRadius: 12,
                     background: emoji === e ? '#FDEEDC' : '#fff',
-                    border: emoji === e ? `2px solid ${ACCENT}` : '2px solid #DCE6EF',
+                    border: emoji === e ? `2px solid ${ACCENT}` : '2px solid #E8DEC9',
                   }}
                 >{e}</button>
               ))}
@@ -394,7 +396,7 @@ function JoinProfile({ trip, onSubmit, onLeave }) {
       <div className="vj-card" style={{ width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div style={{ fontSize: 52 }}>{trip.config.emoji || '✈️'}</div>
-          <h1 style={{ fontSize: 24, margin: '8px 0 4px' }}>{trip.config.name}</h1>
+          <h1 style={{ fontFamily: SERIF, fontSize: 25, fontWeight: 700, margin: '8px 0 4px' }}>{trip.config.name}</h1>
           <p style={{ color: INK_SOFT, margin: 0, fontSize: 15 }}>¿Quién sos? Así todos saben quién agrega cada plan.</p>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -520,7 +522,7 @@ function MainApp({ tripCode, trip, member, syncStatus, onLeave }) {
           className="vj-overlay"
           onClick={() => setFullPhoto(null)}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(10, 20, 35, 0.95)', zIndex: 100,
+            position: 'fixed', inset: 0, background: 'rgba(30, 22, 12, 0.95)', zIndex: 100,
             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12,
           }}
         >
@@ -550,14 +552,14 @@ function Header({ config, syncStatus }) {
 
   return (
     <div style={{
-      background: `linear-gradient(150deg, #2C5F8A 0%, ${INK} 80%)`, color: '#fff',
+      background: `linear-gradient(150deg, #4A3826 0%, ${INK} 80%)`, color: '#fff',
       padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 18px 18px', marginBottom: 16,
-      borderRadius: '0 0 24px 24px', boxShadow: '0 4px 16px rgba(30, 58, 95, 0.25)',
+      borderRadius: '0 0 24px 24px', boxShadow: '0 4px 16px rgba(61, 46, 31, 0.25)',
     }}>
       <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ fontSize: 34 }}>{config.emoji || '✈️'}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 19, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{config.name}</div>
+          <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 20, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{config.name}</div>
           <div style={{ fontSize: 13, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 6 }}>
             {config.destination && <><MapPin size={12} /> {config.destination} · </>}
             {formatDayShort(config.startDate)} → {formatDayShort(config.endDate)}
@@ -583,9 +585,9 @@ function TabBar({ tab, setTab }) {
   return (
     <div style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50,
-      background: '#fff', borderTop: '1px solid #E3EBF2',
+      background: '#fff', borderTop: '1px solid #EEE4D2',
       paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-      boxShadow: '0 -4px 16px rgba(30, 58, 95, 0.06)',
+      boxShadow: '0 -4px 16px rgba(61, 46, 31, 0.06)',
     }}>
       <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex' }}>
         {tabs.map(t => {
@@ -687,7 +689,7 @@ function ItineraryView({ config, events, members, onAdd, onOpen }) {
           <div key={day} ref={isToday ? todayRef : null} style={{ marginBottom: 18, scrollMarginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, padding: '0 2px' }}>
               <span style={{
-                fontWeight: 800, fontSize: 15,
+                fontFamily: SERIF, fontWeight: 700, fontSize: 16,
                 color: isToday ? ACCENT : INK,
               }}>
                 {isToday ? '📍 HOY — ' : ''}{formatDayLabel(day)}
@@ -701,7 +703,7 @@ function ItineraryView({ config, events, members, onAdd, onOpen }) {
                   className="vj-press"
                   onClick={() => onAdd(day)}
                   style={{
-                    background: '#fff', border: '2px dashed #CBD9E5', borderRadius: 14,
+                    background: '#fff', border: '2px dashed #DFD3BC', borderRadius: 14,
                     padding: '12px', color: INK_SOFT, fontSize: 14, textAlign: 'center',
                   }}
                 >
@@ -809,7 +811,7 @@ function EventModal({ config, member, initial, defaultDate, onSave, onClose }) {
               onClick={() => setCategory(c.id)}
               style={{
                 padding: '7px 12px', borderRadius: 20, fontSize: 13.5, fontWeight: 600,
-                background: category === c.id ? `${c.color}22` : '#F2F6FA',
+                background: category === c.id ? `${c.color}22` : '#F7F0E3',
                 border: category === c.id ? `2px solid ${c.color}` : '2px solid transparent',
                 color: INK,
               }}
@@ -860,7 +862,7 @@ function EventModal({ config, member, initial, defaultDate, onSave, onClose }) {
               <button
                 className="vj-press"
                 onClick={() => fileRef.current?.click()}
-                style={{ width: 68, height: 68, borderRadius: 10, border: '2px dashed #CBD9E5', background: '#F8FBFD', color: INK_SOFT, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, fontSize: 11 }}
+                style={{ width: 68, height: 68, borderRadius: 10, border: '2px dashed #DFD3BC', background: '#FBF5E9', color: INK_SOFT, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, fontSize: 11 }}
               >
                 <Camera size={20} />
                 Foto
@@ -889,7 +891,7 @@ function EventDetail({ event, members, onClose, onEdit, onDelete, onFullPhoto })
     <Sheet onClose={onClose} title={`${cat.emoji} ${cat.label}`}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div>
-          <h2 style={{ margin: '0 0 4px', fontSize: 21 }}>{event.title}</h2>
+          <h2 style={{ fontFamily: SERIF, margin: '0 0 4px', fontSize: 22, fontWeight: 700 }}>{event.title}</h2>
           <div style={{ color: INK_SOFT, fontSize: 14.5, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <Calendar size={15} /> {formatDayLabel(event.date)}{event.time ? ` · ${event.time} hs` : ''}
@@ -909,7 +911,7 @@ function EventDetail({ event, members, onClose, onEdit, onDelete, onFullPhoto })
         </div>
 
         {event.notes && (
-          <div style={{ background: '#F8FBFD', borderRadius: 12, padding: '10px 12px', fontSize: 14.5, display: 'flex', gap: 8 }}>
+          <div style={{ background: '#FBF5E9', borderRadius: 12, padding: '10px 12px', fontSize: 14.5, display: 'flex', gap: 8 }}>
             <StickyNote size={16} style={{ flexShrink: 0, marginTop: 2 }} color={INK_SOFT} />
             <span style={{ whiteSpace: 'pre-wrap' }}>{event.notes}</span>
           </div>
@@ -1050,7 +1052,7 @@ function DocsView({ tripCode, docs, member, members, onFullPhoto }) {
               <button
                 className="vj-press"
                 onClick={() => fileRef.current?.click()}
-                style={{ padding: '26px', borderRadius: 14, border: '2px dashed #CBD9E5', background: '#F8FBFD', color: INK_SOFT, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}
+                style={{ padding: '26px', borderRadius: 14, border: '2px dashed #DFD3BC', background: '#FBF5E9', color: INK_SOFT, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}
               >
                 <Camera size={26} />
                 Sacar foto o elegir de la galería
@@ -1073,7 +1075,7 @@ function PeopleView({ tripCode, config, members, member, onLeave }) {
   const [editingTrip, setEditingTrip] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const shareText = `¡Sumate a "${config.name}"! 🌎\n\n1. Entrá a ${window.location.origin}/viaje.html\n2. Tocá "Tengo un código de viaje"\n3. Ingresá el código: ${tripCode}`;
+  const shareText = `¡Sumate a "${config.name}" en TizTrip! 🌎\n\n1. Entrá a ${window.location.origin}/tiztrip.html\n2. Tocá "Tengo un código de viaje"\n3. Ingresá el código: ${tripCode}`;
 
   const handleCopy = async () => {
     try {
@@ -1105,7 +1107,7 @@ function PeopleView({ tripCode, config, members, member, onLeave }) {
         <p style={{ color: INK_SOFT, fontSize: 13.5, margin: '0 0 10px' }}>
           Compartí este código. Cada persona entra desde su teléfono, pone su nombre y ve (y recibe) todo.
         </p>
-        <div style={{ background: '#F2F6FA', borderRadius: 12, padding: '12px 14px', textAlign: 'center', fontWeight: 800, fontSize: 20, letterSpacing: 0.5, marginBottom: 10 }}>
+        <div style={{ fontFamily: SERIF, background: '#FBF5E9', border: '1.5px solid #E8DEC9', borderRadius: 12, padding: '12px 14px', textAlign: 'center', fontWeight: 700, fontSize: 20, letterSpacing: 0.5, marginBottom: 10 }}>
           {tripCode}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -1129,7 +1131,7 @@ function PeopleView({ tripCode, config, members, member, onLeave }) {
                 {m.name.charAt(0).toUpperCase()}
               </div>
               <span style={{ fontWeight: 600 }}>{m.name}</span>
-              {m.id === member.id && <span style={{ fontSize: 12, background: '#EAF2F9', color: INK_SOFT, borderRadius: 10, padding: '2px 8px' }}>vos</span>}
+              {m.id === member.id && <span style={{ fontSize: 12, background: '#F5EDDE', color: INK_SOFT, borderRadius: 10, padding: '2px 8px' }}>vos</span>}
             </div>
           ))}
         </div>
@@ -1180,7 +1182,7 @@ function EditTripSheet({ tripCode, config, onClose }) {
         <input value={destination} onChange={e => setDestination(e.target.value)} placeholder="Destino" />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {TRIP_EMOJIS.map(e => (
-            <button key={e} className="vj-press" onClick={() => setEmoji(e)} style={{ fontSize: 22, width: 42, height: 42, borderRadius: 11, background: emoji === e ? '#FDEEDC' : '#fff', border: emoji === e ? `2px solid ${ACCENT}` : '2px solid #DCE6EF' }}>{e}</button>
+            <button key={e} className="vj-press" onClick={() => setEmoji(e)} style={{ fontSize: 22, width: 42, height: 42, borderRadius: 11, background: emoji === e ? '#FDEEDC' : '#fff', border: emoji === e ? `2px solid ${ACCENT}` : '2px solid #E8DEC9' }}>{e}</button>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -1259,7 +1261,7 @@ function Sheet({ title, children, onClose }) {
     <div
       className="vj-overlay"
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(15, 28, 45, 0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(42, 32, 20, 0.55)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
     >
       <div
         className="vj-card"
@@ -1270,8 +1272,8 @@ function Sheet({ title, children, onClose }) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
-          <div style={{ fontWeight: 800, fontSize: 17, flex: 1 }}>{title}</div>
-          <button onClick={onClose} style={{ background: '#E9F0F6', borderRadius: '50%', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', color: INK }}>
+          <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 18, flex: 1 }}>{title}</div>
+          <button onClick={onClose} style={{ background: '#F0E7D5', borderRadius: '50%', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', color: INK }}>
             <X size={18} />
           </button>
         </div>

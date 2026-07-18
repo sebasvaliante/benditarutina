@@ -1,5 +1,5 @@
 // ============================================================================
-// BENDITO VIAJE — utilidades
+// TIZTRIP — utilidades
 // ============================================================================
 
 export const TRIP_CODE_KEY = 'benditoviaje_trip_code';
@@ -164,8 +164,8 @@ export const showNotification = async (title, body, tag) => {
   const options = {
     body,
     tag,
-    icon: '/viaje-icon.svg',
-    badge: '/viaje-icon.svg',
+    icon: '/tiztrip-icon.svg',
+    badge: '/tiztrip-icon.svg',
     lang: 'es-AR',
   };
   try {

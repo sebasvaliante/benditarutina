@@ -4,7 +4,7 @@ import ViajeApp from './ViajeApp.jsx';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw-viaje.js').catch(() => {});
+    navigator.serviceWorker.register('/sw-tiztrip.js').catch(() => {});
   });
 }
 

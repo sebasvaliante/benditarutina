@@ -1,4 +1,4 @@
-// Service worker de Bendito Viaje: solo maneja notificaciones.
+// Service worker de TizTrip: solo maneja notificaciones.
 // No intercepta fetch, así no afecta a Bendita Rutina (comparten origen).
 
 self.addEventListener('install', () => {
@@ -14,10 +14,10 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
-        if (client.url.includes('viaje') && 'focus' in client) return client.focus();
+        if (client.url.includes('tiztrip') && 'focus' in client) return client.focus();
       }
       if (clients.length > 0 && 'focus' in clients[0]) return clients[0].focus();
-      return self.clients.openWindow('/viaje.html');
+      return self.clients.openWindow('/tiztrip.html');
     })
   );
 });

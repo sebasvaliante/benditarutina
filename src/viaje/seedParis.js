@@ -3,6 +3,10 @@
 // Fuente: itinerario de Frisco Travel by PHD Travel (PDF)
 // ============================================================================
 
+// Código fijo del viaje: entrando con este código desde "Tengo un código de
+// viaje", el primero crea el viaje con todo el plan y el resto se suma.
+export const SEED_TRIP_CODE = 'paris-nofal-2026';
+
 export const SEED_PARIS = {
   config: {
     name: 'París Julio 2026',

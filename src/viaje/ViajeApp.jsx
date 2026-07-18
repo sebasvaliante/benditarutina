@@ -15,6 +15,7 @@ import {
 import {
   generateTripCode, subscribeTripData, saveTripNode, removeTripNode, checkTripCodeExists,
 } from '../firebase.js';
+import { SEED_PARIS } from './seedParis.js';
 
 // ============================================================================
 // RAÍZ
@@ -82,9 +83,15 @@ export default function ViajeApp() {
   }
 
   if (trip.empty || !trip.config) {
-    return <TripSetup tripCode={tripCode} onLeave={handleLeaveTrip} onComplete={async (config, name, color) => {
+    return <TripSetup tripCode={tripCode} onLeave={handleLeaveTrip} onComplete={async (config, name, color, seedEvents) => {
       await saveTripNode(tripCode, 'config', config);
-      await handleSetMember(name, color);
+      const newMember = await handleSetMember(name, color);
+      for (const ev of seedEvents || []) {
+        const id = generateId();
+        await saveTripNode(tripCode, `events/${id}`, {
+          ...ev, id, photos: [], createdBy: newMember.id, createdAt: Date.now(), updatedAt: Date.now(),
+        });
+      }
     }} />;
   }
 
@@ -258,7 +265,17 @@ function TripSetup({ tripCode, onComplete, onLeave }) {
   const [startDate, setStartDate] = useState(todayKey());
   const [endDate, setEndDate] = useState('');
   const [myName, setMyName] = useState('');
+  const [useSeed, setUseSeed] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const applySeed = () => {
+    setUseSeed(true);
+    setName(SEED_PARIS.config.name);
+    setDestination(SEED_PARIS.config.destination);
+    setEmoji(SEED_PARIS.config.emoji);
+    setStartDate(SEED_PARIS.config.startDate);
+    setEndDate(SEED_PARIS.config.endDate);
+  };
 
   const handleSave = async () => {
     if (!name.trim()) { alert('Poné un nombre al viaje'); return; }
@@ -273,7 +290,7 @@ function TripSetup({ tripCode, onComplete, onLeave }) {
       startDate,
       endDate: finalEnd,
       createdAt: Date.now(),
-    }, myName, null);
+    }, myName, null, useSeed ? SEED_PARIS.events : null);
   };
 
   return (
@@ -286,6 +303,28 @@ function TripSetup({ tripCode, onComplete, onLeave }) {
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <button
+            className="vj-press"
+            onClick={() => useSeed ? setUseSeed(false) : applySeed()}
+            style={{
+              textAlign: 'left', borderRadius: 14, padding: '13px 14px',
+              background: useSeed ? '#FDEEDC' : '#fff',
+              border: useSeed ? `2px solid ${ACCENT}` : '2px dashed #CBD9E5',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}
+          >
+            <div style={{ fontSize: 26 }}>🏰</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14.5, color: INK }}>
+                {useSeed ? 'Plan París Julio 2026 ✓' : 'Usar plan París Julio 2026'}
+              </div>
+              <div style={{ fontSize: 12.5, color: INK_SOFT }}>
+                {useSeed
+                  ? `Se cargan ${SEED_PARIS.events.length} planes del itinerario de PHD Travel. Tocá para deshacer.`
+                  : 'Precarga el itinerario completo: Sofitel, Versailles, Louvre, traslados y reservas.'}
+              </div>
+            </div>
+          </button>
           <div>
             <label style={{ fontWeight: 600, fontSize: 14, display: 'block', marginBottom: 6 }}>Nombre del viaje</label>
             <input placeholder="ej: Vacaciones en Brasil" value={name} onChange={e => setName(e.target.value)} />
